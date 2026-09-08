@@ -67,29 +67,75 @@ function getLegacyCustomSources() {
   } catch { return []; }
 }
 
-function clearLegacyDeviceCaches() {
+function getLegacyDiscoveredComics() {
   try {
-    localStorage.removeItem(LEGACY_CUSTOM_SOURCES_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_DISCOVERED_STORAGE_KEY);
-  } catch {}
+    const parsed = JSON.parse(localStorage.getItem(LEGACY_DISCOVERED_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.name) : [];
+  } catch { return []; }
 }
 
-async function migrateLegacyCustomSources() {
+function clearLegacyCustomSources() {
+  try { localStorage.removeItem(LEGACY_CUSTOM_SOURCES_STORAGE_KEY); } catch {}
+}
+
+function clearLegacyDiscoveredComics() {
+  try { localStorage.removeItem(LEGACY_DISCOVERED_STORAGE_KEY); } catch {}
+}
+
+function mergeLegacyDiscovered(serverFiles = []) {
+  const byId = new Map((serverFiles || []).filter((item) => item?.id).map((item) => [item.id, item]));
+  for (const item of getLegacyDiscoveredComics()) if (item?.id && !byId.has(item.id)) byId.set(item.id, item);
+  return [...byId.values()];
+}
+
+async function migrateLegacyDeviceState() {
+  if (!getAdminToken()) return false;
+  let changed = false;
+
   const sources = getLegacyCustomSources();
-  if (!sources.length || !getAdminToken()) return false;
-  try {
-    const result = await request('/api/library', {
-      method: 'POST',
-      admin: true,
-      timeout: 60_000,
-      body: JSON.stringify({ action: 'register-sources', sources })
-    });
-    if (Number(result?.saved || 0) > 0 || !result?.failed?.length) {
-      clearLegacyDeviceCaches();
-      return true;
+  if (sources.length) {
+    try {
+      const result = await request('/api/library', {
+        method: 'POST',
+        admin: true,
+        timeout: 60_000,
+        body: JSON.stringify({ action: 'register-sources', sources })
+      });
+      if (!result?.failed?.length) {
+        clearLegacyCustomSources();
+        changed = true;
+      }
+    } catch {}
+  }
+
+  // A 2.1.5 apagava esse cache depois de migrar apenas as fontes. Esse cache pode
+  // conter centenas de HQs já descobertas. Agora ele é enviado ao catálogo remoto
+  // em lotes e só é removido do navegador depois da confirmação do servidor.
+  const discovered = getLegacyDiscoveredComics();
+  if (discovered.length) {
+    let migratedAll = true;
+    for (let offset = 0; offset < discovered.length; offset += 200) {
+      const batch = discovered.slice(offset, offset + 200);
+      try {
+        const result = await request('/api/library', {
+          method: 'POST',
+          admin: true,
+          timeout: 90_000,
+          body: JSON.stringify({ action: 'recover-files', files: batch })
+        });
+        if (result?.persisted !== true) { migratedAll = false; break; }
+      } catch {
+        migratedAll = false;
+        break;
+      }
     }
-  } catch {}
-  return false;
+    if (migratedAll) {
+      clearLegacyDiscoveredComics();
+      changed = true;
+    }
+  }
+
+  return changed;
 }
 
 async function parseError(response) {
@@ -150,7 +196,11 @@ export async function uploadThumbnailBlob(blob, filename) {
 }
 
 async function getComics(fresh = false) {
-  return request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`);
+  const response = await request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`);
+  // Enquanto um cache antigo ainda não foi migrado, não deixa a interface regredir
+  // para o seed de 698 itens. O servidor continua sendo a fonte canônica assim que
+  // a migração for confirmada.
+  return { ...response, files: mergeLegacyDiscovered(response.files || []) };
 }
 
 async function getComic(id) {
@@ -161,9 +211,9 @@ async function syncLibrarySources({ onProgress } = {}) {
   let status = { sources: [] };
   try { status = await request('/api/library', { timeout: 30_000 }); } catch {}
 
-  // Migra uma única vez os Drives que versões antigas deixaram presos apenas neste
-  // navegador. Depois disso, a lista de fontes vem exclusivamente do servidor.
-  if (await migrateLegacyCustomSources()) {
+  // Migra fontes e HQs descobertas por versões antigas sem apagar nada antes da
+  // confirmação do armazenamento compartilhado.
+  if (await migrateLegacyDeviceState()) {
     try { status = await request(`/api/library?fresh=${Date.now()}`, { timeout: 30_000 }); } catch {}
   }
 
@@ -172,47 +222,112 @@ async function syncLibrarySources({ onProgress } = {}) {
   splitLegacyMarvelExtraSource(sourceById);
   const sources = [...sourceById.values()];
 
-  // Cada Drive recebe sua própria janela de execução. Isso evita que uma coleção
-  // muito grande consuma o tempo das demais e permite salvar o que já foi encontrado.
   if (!sources.length) {
-    const result = await request('/api/library', {
+    return request('/api/library', {
       method: 'POST',
       timeout: 290_000,
       body: JSON.stringify({ action: 'sync' })
     });
-    return result;
   }
 
   const allFiles = new Map();
   const summaries = [];
   let added = 0;
-  let total = 0;
+  let total = Number(status.total || 0);
   let persisted = false;
 
+  // Uma fonte grande é dividida em várias execuções. Cada execução salva o que
+  // encontrou antes de continuar. Isso impede MARVEL DRIVE e outros Drives grandes
+  // de perderem tudo quando chegam perto do limite de duração da Function.
   for (let index = 0; index < sources.length; index += 1) {
     const source = sources[index];
+    let continuation = null;
+    let sourceSummary = null;
+    let sourceFiles = 0;
+    let sourceFolders = 0;
+    let sourceFailedFolders = 0;
+    let pass = 0;
+    const maxPasses = 60;
+
     try {
-      const result = await request('/api/library', {
-        method: 'POST',
-        timeout: 290_000,
-        body: JSON.stringify({ action: 'sync', sourceIds: [source.id] })
-      });
-      for (const file of result.files || []) if (file?.id) allFiles.set(file.id, file);
-        summaries.push(...(result.sources || []));
-      added += Number(result.added || 0);
-      total = Math.max(total, Number(result.total || 0));
-      persisted = persisted || Boolean(result.persisted);
-      if (onProgress) await onProgress({ source, index, totalSources: sources.length, result });
+      do {
+        pass += 1;
+        const result = await request('/api/library', {
+          method: 'POST',
+          timeout: 290_000,
+          body: JSON.stringify({
+            action: 'sync',
+            sourceIds: [source.id],
+            ...(continuation ? { continuation } : {})
+          })
+        });
+
+        for (const file of result.files || []) if (file?.id) allFiles.set(file.id, file);
+        added += Number(result.added || 0);
+        total = Math.max(total, Number(result.total || 0));
+        persisted = persisted || Boolean(result.persisted);
+
+        const chunkSummary = (result.sources || []).find((item) => item.id === source.id) || (result.sources || [])[0];
+        if (!chunkSummary?.ok) throw new ApiError(chunkSummary?.error || 'Falha na varredura.', { code: 'DRIVE_SYNC_FAILED' });
+
+        sourceFiles += Number(chunkSummary.files || 0);
+        sourceFolders += Number(chunkSummary.foldersProcessed || chunkSummary.folders || 0);
+        sourceFailedFolders += Number(chunkSummary.failedFolders || 0);
+        continuation = chunkSummary.continuation || null;
+        sourceSummary = {
+          ...chunkSummary,
+          files: sourceFiles,
+          folders: sourceFolders,
+          failedFolders: sourceFailedFolders,
+          passes: pass,
+          complete: !continuation && chunkSummary.complete !== false
+        };
+
+        if (onProgress) await onProgress({
+          source,
+          index,
+          totalSources: sources.length,
+          pass,
+          continuation: Boolean(continuation),
+          result
+        });
+
+        // Recarrega o catálogo entre os lotes para a interface mostrar o crescimento
+        // e para a próxima execução partir do snapshot recém-persistido.
+        if (continuation) {
+          try {
+            const fresh = await getComics(true);
+            total = Math.max(total, Number(fresh.files?.length || 0));
+          } catch {}
+        }
+      } while (continuation && pass < maxPasses);
+
+      if (continuation) {
+        throw new ApiError('A varredura atingiu o limite de lotes e será retomada na próxima atualização.', { code: 'DRIVE_SYNC_CONTINUATION_LIMIT' });
+      }
+      summaries.push(sourceSummary || { id: source.id, label: source.label, category: source.category, ok: true, complete: true });
     } catch (error) {
-      summaries.push({ id: source.id, label: source.label, category: source.category, ok: false, error: error.message || 'Falha na varredura.' });
-      if (onProgress) await onProgress({ source, index, totalSources: sources.length, error });
+      summaries.push({
+        id: source.id,
+        label: source.label,
+        category: source.category,
+        ok: false,
+        complete: false,
+        files: sourceFiles,
+        folders: sourceFolders,
+        failedFolders: sourceFailedFolders,
+        passes: pass,
+        error: error.message || 'Falha na varredura.'
+      });
+      if (onProgress) await onProgress({ source, index, totalSources: sources.length, pass, error });
     }
   }
 
-  const successful = summaries.filter((item) => item.ok).length;
+  const successful = summaries.filter((item) => item.ok && item.complete !== false).length;
   return {
     ok: successful > 0,
     partial: successful < summaries.length,
+    complete: successful === summaries.length,
     sources: summaries,
     files: [...allFiles.values()],
     found: allFiles.size,

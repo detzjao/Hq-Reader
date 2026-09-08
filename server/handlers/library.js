@@ -1,6 +1,6 @@
 import { assertAdminRequest } from '../auth.js';
 import { libraryStatus } from '../catalog.js';
-import { registerPublicFolderSources, syncConfiguredSources } from '../publicFolderSync.js';
+import { importRecoveredDriveFiles, registerPublicFolderSources, syncConfiguredSources } from '../publicFolderSync.js';
 import { sendError } from '../http.js';
 
 export const config = { maxDuration: 300 };
@@ -20,7 +20,16 @@ export default async function handler(req, res) {
         res.setHeader('Cache-Control', 'private, no-store');
         return res.status(200).json(result);
       }
-      const result = await syncConfiguredSources({ sourceIds: body.sourceIds || [] });
+      if (body.action === 'recover-files') {
+        assertAdminRequest(req);
+        const result = await importRecoveredDriveFiles(body.files || []);
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.status(200).json(result);
+      }
+      const result = await syncConfiguredSources({
+        sourceIds: body.sourceIds || [],
+        continuation: body.continuation || null
+      });
       res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json(result);
     }

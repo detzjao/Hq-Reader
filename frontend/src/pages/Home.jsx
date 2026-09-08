@@ -8,7 +8,7 @@ import SearchBar from '../components/SearchBar.jsx';
 import { api } from '../services/api.js';
 
 const CATEGORY_ORDER = ['Marvel', 'DC Comics', 'Turma da Mônica', 'Outros'];
-const AUTO_SYNC_SESSION_KEY = 'hq-reader:auto-drive-sync:v2.2';
+const AUTO_SYNC_SESSION_KEY = 'hq-reader:auto-drive-sync:v2.3';
 
 export default function Home() {
   const [comics, setComics] = useState([]);
@@ -16,7 +16,7 @@ export default function Home() {
   const [category, setCategory] = useState('Todas');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [syncing, setSyncing] = useState(false);
+  const [syncing, setSyncing] = useState(true);
   const [syncProgress, setSyncProgress] = useState('');
   const searchRef = useRef(null);
 
@@ -36,7 +36,10 @@ export default function Home() {
 
     async function syncDrivesOnStart() {
       try {
-        if (sessionStorage.getItem(AUTO_SYNC_SESSION_KEY) === '1') return;
+        if (sessionStorage.getItem(AUTO_SYNC_SESSION_KEY) === '1') {
+          if (active) setSyncing(false);
+          return;
+        }
       } catch {}
 
       try {
@@ -106,7 +109,13 @@ export default function Home() {
         <section className="mb-9">
           <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
             <div><p className="text-xs font-bold uppercase tracking-[0.25em] text-red-500">Biblioteca de HQs</p><h1 className="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">Sua biblioteca</h1></div>
-            {!loading && !error && <p className="text-sm font-medium text-zinc-600">{comics.length} {comics.length === 1 ? 'HQ' : 'HQs'}{syncing ? ` · sincronizando ${syncProgress || 'Drives…'}` : ''}</p>}
+            {!loading && !error && (
+              <p className="text-sm font-medium text-zinc-600">
+                {syncing
+                  ? `Sincronizando biblioteca completa${syncProgress ? ` · ${syncProgress}` : '…'}`
+                  : `${comics.length} ${comics.length === 1 ? 'HQ' : 'HQs'}`}
+              </p>
+            )}
           </div>
           <SearchBar ref={searchRef} value={search} onChange={setSearch} />
           {!loading && !error && categories.length > 0 && (

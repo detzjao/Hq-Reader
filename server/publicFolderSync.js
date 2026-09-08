@@ -386,117 +386,161 @@ export async function resolvePublicFileCandidate(item) {
   return probeAndNormalizeFileItem(item);
 }
 
-async function crawlSource(source) {
+function normalizeContinuation(source, continuation) {
+  if (!continuation || continuation.sourceId !== source.id) return null;
+  const frontier = Array.isArray(continuation.frontier)
+    ? continuation.frontier
+      .filter((item) => item?.id)
+      .map((item) => ({
+        id: String(item.id),
+        path: cleanPath(item.path || source.path || source.category),
+        resourceKey: String(item.resourceKey || '')
+      }))
+    : [];
+  const visited = Array.isArray(continuation.visited)
+    ? continuation.visited.map((id) => String(id || '')).filter(Boolean)
+    : [];
+  return { frontier, visited };
+}
+
+async function crawlSource(source, { continuation = null } = {}) {
   const maxFolders = Number(process.env.PUBLIC_FOLDER_MAX_FOLDERS || 3500);
   const maxFiles = Number(process.env.PUBLIC_FOLDER_MAX_FILES || 30_000);
   const bootstrapFolders = bootstrapFoldersForSource(source.id);
   const requestedConcurrency = Number(process.env.PUBLIC_FOLDER_CONCURRENCY || (bootstrapFolders.length ? 8 : 5));
   const concurrency = Math.max(1, Math.min(8, requestedConcurrency));
-  const visitedFolders = new Set();
-  const files = new Map();
+  const budgetMs = Math.max(45_000, Math.min(220_000, Number(process.env.PUBLIC_FOLDER_CHUNK_MS || 175_000)));
+  const startedAt = Date.now();
   const rootPath = source.path || source.category;
-  let frontier = [
-    { id: source.id, path: rootPath, resourceKey: source.resourceKey || '' },
-    ...bootstrapFolders.map((folder) => ({
-      id: folder.id,
-      path: folder.group
-        ? `${rootPath}/${folder.group}`.replace(/\/{2,}/g, '/')
-        : rootPath,
-      resourceKey: folder.resourceKey || ''
-    }))
-  ];
+  const restored = normalizeContinuation(source, continuation);
+  const visitedFolders = new Set(restored?.visited || []);
+  const files = new Map();
+  const queue = restored?.frontier?.length
+    ? [...restored.frontier]
+    : [
+      { id: source.id, path: rootPath, resourceKey: source.resourceKey || '' },
+      ...bootstrapFolders.map((folder) => ({
+        id: folder.id,
+        path: folder.group
+          ? `${rootPath}/${folder.group}`.replace(/\/{2,}/g, '/')
+          : rootPath,
+        resourceKey: folder.resourceKey || ''
+      }))
+    ];
   let failedFolders = 0;
+  let foldersProcessed = 0;
 
-  while (frontier.length) {
-    const nextFrontier = [];
-    for (let offset = 0; offset < frontier.length; offset += concurrency) {
-      const batch = frontier.slice(offset, offset + concurrency).filter((folder) => !visitedFolders.has(folder.id));
-      batch.forEach((folder) => visitedFolders.add(folder.id));
-      if (!batch.length) continue;
-      if (visitedFolders.size > maxFolders) {
-        const error = new Error(`A fonte “${source.label}” excedeu o limite de pastas da varredura.`);
-        error.code = 'PUBLIC_FOLDER_LIMIT';
-        error.status = 413;
-        throw error;
+  while (queue.length) {
+    // Devolve uma continuação antes de encostar no limite de 300 s da Vercel.
+    // O que já foi encontrado nesta execução será persistido imediatamente.
+    if (foldersProcessed > 0 && Date.now() - startedAt >= budgetMs) break;
+
+    const batch = [];
+    while (queue.length && batch.length < concurrency) {
+      const folder = queue.shift();
+      if (!folder?.id || visitedFolders.has(folder.id)) continue;
+      visitedFolders.add(folder.id);
+      batch.push(folder);
+    }
+    if (!batch.length) continue;
+
+    if (visitedFolders.size > maxFolders) {
+      const error = new Error(`A fonte “${source.label}” excedeu o limite de pastas da varredura.`);
+      error.code = 'PUBLIC_FOLDER_LIMIT';
+      error.status = 413;
+      throw error;
+    }
+
+    const results = await Promise.allSettled(
+      batch.map(async (folder) => ({ folder, items: await fetchFolderItems(folder.id, folder.resourceKey) }))
+    );
+
+    for (const result of results) {
+      foldersProcessed += 1;
+      if (result.status === 'rejected') { failedFolders += 1; continue; }
+      const { folder, items } = result.value;
+      const fileCandidates = [];
+      for (const item of items) {
+        if (item.type === 'folder') {
+          if (!visitedFolders.has(item.id)) queue.push({
+            id: item.id,
+            resourceKey: item.resourceKey || '',
+            path: `${folder.path}/${item.title}`.replace(/\/{2,}/g, '/')
+          });
+        } else if (item.type === 'file') {
+          fileCandidates.push(item);
+        }
       }
 
-      const results = await Promise.allSettled(batch.map(async (folder) => ({ folder, items: await fetchFolderItems(folder.id, folder.resourceKey) })));
-      for (const result of results) {
-        if (result.status === 'rejected') { failedFolders += 1; continue; }
-        const { folder, items } = result.value;
-        const fileCandidates = [];
-        for (const item of items) {
-          if (item.type === 'folder') {
-            if (!visitedFolders.has(item.id)) nextFrontier.push({
-              id: item.id,
-              resourceKey: item.resourceKey || '',
-              path: `${folder.path}/${item.title}`.replace(/\/{2,}/g, '/')
-            });
-          } else if (item.type === 'file') {
-            fileCandidates.push(item);
+      const probeConcurrency = Math.max(2, Math.min(8, Number(process.env.PUBLIC_FILE_PROBE_CONCURRENCY || 6)));
+      for (let fileOffset = 0; fileOffset < fileCandidates.length; fileOffset += probeConcurrency) {
+        const fileBatch = fileCandidates.slice(fileOffset, fileOffset + probeConcurrency);
+        const resolvedBatch = await Promise.allSettled(fileBatch.map(resolvePublicFileCandidate));
+        for (let fileIndex = 0; fileIndex < resolvedBatch.length; fileIndex += 1) {
+          const resolved = resolvedBatch[fileIndex];
+          if (resolved.status !== 'fulfilled' || !resolved.value) continue;
+
+          if (resolved.value.type === 'folder') {
+            const targetFolder = resolved.value.item;
+            if (targetFolder?.id && !visitedFolders.has(targetFolder.id)) {
+              queue.push({
+                id: targetFolder.id,
+                resourceKey: targetFolder.resourceKey || '',
+                path: `${folder.path}/${targetFolder.title || fileBatch[fileIndex]?.title || 'Atalho'}`.replace(/\/{2,}/g, '/')
+              });
+            }
+            continue;
           }
-        }
 
-        // Arquivos com extensão conhecida entram imediatamente. Itens sem extensão
-        // são inspecionados em paralelo pelo MIME/assinatura do arquivo. Isso é
-        // essencial para Drives que armazenam PDFs com nomes sem ".pdf".
-        const probeConcurrency = Math.max(2, Math.min(8, Number(process.env.PUBLIC_FILE_PROBE_CONCURRENCY || 6)));
-        for (let fileOffset = 0; fileOffset < fileCandidates.length; fileOffset += probeConcurrency) {
-          const fileBatch = fileCandidates.slice(fileOffset, fileOffset + probeConcurrency);
-          const resolvedBatch = await Promise.allSettled(fileBatch.map(resolvePublicFileCandidate));
-          for (let fileIndex = 0; fileIndex < resolvedBatch.length; fileIndex += 1) {
-            const resolved = resolvedBatch[fileIndex];
-            if (resolved.status !== 'fulfilled' || !resolved.value) continue;
-
-            if (resolved.value.type === 'folder') {
-              const targetFolder = resolved.value.item;
-              if (targetFolder?.id && !visitedFolders.has(targetFolder.id)) {
-                nextFrontier.push({
-                  id: targetFolder.id,
-                  resourceKey: targetFolder.resourceKey || '',
-                  path: `${folder.path}/${targetFolder.title || fileBatch[fileIndex]?.title || 'Atalho'}`.replace(/\/{2,}/g, '/')
-                });
-              }
-              continue;
-            }
-
-            const fileItem = resolved.value.item;
-            if (!fileItem?.id || !isSupportedName(fileItem.title)) continue;
-            files.set(fileItem.id, {
-              id: fileItem.id,
-              name: fileItem.title,
-              mimeType: fileItem.mimeType || mimeForName(fileItem.title),
-              size: Number(fileItem.size || 0),
-              path: folder.path,
-              category: source.category,
-              sourceType: 'drive',
-              sourceFolderId: source.id,
-              sourceUrl: fileItem.url,
-              resourceKey: fileItem.resourceKey || resourceKeyFromUrl(fileItem.url),
-              addedAt: new Date().toISOString(),
-              syncedAt: new Date().toISOString()
-            });
-            if (files.size > maxFiles) {
-              const error = new Error(`A fonte “${source.label}” excedeu o limite de arquivos da varredura.`);
-              error.code = 'PUBLIC_FOLDER_LIMIT';
-              error.status = 413;
-              throw error;
-            }
+          const fileItem = resolved.value.item;
+          if (!fileItem?.id || !isSupportedName(fileItem.title)) continue;
+          files.set(fileItem.id, {
+            id: fileItem.id,
+            name: fileItem.title,
+            mimeType: fileItem.mimeType || mimeForName(fileItem.title),
+            size: Number(fileItem.size || 0),
+            path: folder.path,
+            category: source.category,
+            sourceType: 'drive',
+            sourceFolderId: source.id,
+            sourceUrl: fileItem.url,
+            resourceKey: fileItem.resourceKey || resourceKeyFromUrl(fileItem.url),
+            addedAt: new Date().toISOString(),
+            syncedAt: new Date().toISOString()
+          });
+          if (files.size > maxFiles) {
+            const error = new Error(`A fonte “${source.label}” excedeu o limite de arquivos da varredura.`);
+            error.code = 'PUBLIC_FOLDER_LIMIT';
+            error.status = 413;
+            throw error;
           }
         }
       }
     }
-    frontier = nextFrontier;
   }
 
-  if (!files.size) {
+  const complete = queue.length === 0;
+  if (!files.size && complete && !continuation) {
     const error = new Error(`A fonte “${source.label}” não retornou HQs legíveis.`);
     error.code = 'PUBLIC_FOLDER_EMPTY';
     error.status = 502;
     throw error;
   }
 
-  return { source, files: [...files.values()], folders: visitedFolders.size, failedFolders, bootstrapFolders: bootstrapFolders.length };
+  return {
+    source,
+    files: [...files.values()],
+    folders: visitedFolders.size,
+    foldersProcessed,
+    failedFolders,
+    bootstrapFolders: continuation ? 0 : bootstrapFolders.length,
+    complete,
+    continuation: complete ? null : {
+      sourceId: source.id,
+      frontier: queue,
+      visited: [...visitedFolders]
+    }
+  };
 }
 
 function transientPublicComic(file) {
@@ -510,7 +554,7 @@ function transientPublicComic(file) {
   return comic;
 }
 
-export async function syncConfiguredSources({ extraSources = [], sourceIds = [] } = {}) {
+export async function syncConfiguredSources({ extraSources = [], sourceIds = [], continuation = null } = {}) {
   const catalog = await getCatalog({ force: true });
   const sourceById = new Map();
   for (const source of catalog.sources || []) {
@@ -529,7 +573,9 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [] 
   const sources = [...sourceById.values()].filter((source) => !requestedSourceIds.size || requestedSourceIds.has(source.id));
   if (!sources.length) return { ok: true, files: [], sources: [], added: 0, found: 0, total: catalog.files.length, persisted: false };
 
-  const results = await Promise.allSettled(sources.map(crawlSource));
+  const results = await Promise.allSettled(sources.map((source) => crawlSource(source, {
+    continuation: continuation?.sourceId === source.id ? continuation : null
+  })));
   const existingIds = new Set(catalog.files.map((file) => file.id));
   const foundById = new Map();
   const summaries = [];
@@ -549,7 +595,10 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [] 
       files: result.value.files.length,
       folders: result.value.folders,
       failedFolders: result.value.failedFolders,
-      bootstrapFolders: result.value.bootstrapFolders || 0
+      bootstrapFolders: result.value.bootstrapFolders || 0,
+      foldersProcessed: result.value.foldersProcessed || 0,
+      complete: result.value.complete !== false,
+      continuation: result.value.continuation || null
     });
   });
 
@@ -570,9 +619,11 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [] 
   }
 
   const successful = summaries.filter((item) => item.ok).length;
+  const complete = summaries.length > 0 && summaries.every((item) => item.ok && item.complete !== false);
   return {
     ok: successful > 0,
-    partial: successful > 0 && successful < summaries.length,
+    partial: !complete,
+    complete,
     sources: summaries,
     files: found.map(transientPublicComic),
     found: found.length,
@@ -580,6 +631,44 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [] 
     total: new Set([...existingIds, ...foundById.keys()]).size,
     persisted
   };
+}
+
+
+export async function importRecoveredDriveFiles(inputs = []) {
+  if (!isBlobConfigured()) throw persistentStorageError();
+  const catalog = await getCatalog({ force: true });
+  const byId = new Map((catalog.files || []).filter((file) => file?.id).map((file) => [file.id, file]));
+  let accepted = 0;
+
+  for (const input of Array.isArray(inputs) ? inputs.slice(0, 500) : []) {
+    const id = String(input?.id || '').trim();
+    if (!/^[A-Za-z0-9_-]{10,}$/.test(id)) continue;
+    const rawName = String(input?.name || '').trim() || `HQ-${id.slice(-8)}`;
+    const name = ensureSupportedExtension(rawName, input?.mimeType, `HQ-${id.slice(-8)}`);
+    if (!isSupportedName(name)) continue;
+    const recoveredPath = cleanPath(input?.path || input?.category || 'Outros');
+    const category = cleanPath(input?.category || '').split('/')[0] || recoveredPath.split('/')[0] || 'Outros';
+    const previous = byId.get(id) || {};
+    byId.set(id, {
+      ...previous,
+      id,
+      name,
+      mimeType: input?.mimeType || previous.mimeType || mimeForName(name),
+      size: Number(input?.size || previous.size || 0),
+      path: recoveredPath || previous.path || category,
+      category,
+      sourceType: 'drive',
+      sourceFolderId: input?.sourceFolderId || previous.sourceFolderId || '',
+      sourceUrl: input?.sourceUrl || previous.sourceUrl || `https://drive.google.com/file/d/${id}/view`,
+      resourceKey: input?.resourceKey || previous.resourceKey || '',
+      addedAt: input?.addedAt || previous.addedAt || new Date().toISOString(),
+      syncedAt: new Date().toISOString()
+    });
+    accepted += 1;
+  }
+
+  if (accepted) await saveSyncSnapshot([...byId.values()]);
+  return { accepted, persisted: true, total: byId.size };
 }
 
 function persistentStorageError(message = 'Não foi possível salvar a biblioteca de forma compartilhada no servidor.') {

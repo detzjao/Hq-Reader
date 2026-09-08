@@ -220,6 +220,6 @@ Também foi ampliado o parser do `embeddedfolderview`: além do bloco visual `fl
 Drives adicionados pela tela administrativa passam a ser registrados no catálogo persistente do servidor antes de serem considerados adicionados. A lista de fontes deixa de depender do `localStorage` do navegador, então computador, celular e outros dispositivos carregam a mesma biblioteca. Versões antigas que tenham fontes presas ao navegador são migradas automaticamente quando o administrador autenticado executa uma sincronização.
 
 
-## Persistência compartilhada (2.1.5)
+## Persistência compartilhada (2.1.6)
 
-A biblioteca dinâmica usa Vercel Blob. A versão 2.1.5 reconhece tanto a conexão atual via OIDC (`BLOB_STORE_ID`) quanto lojas legadas com `BLOB_READ_WRITE_TOKEN`. Em deployments atuais da Vercel, conectar um Blob Store ao projeto é suficiente para o SDK autenticar operações de servidor via OIDC.
+A biblioteca dinâmica usa Vercel Blob. A versão 2.1.6 reconhece tanto a conexão atual via OIDC (`BLOB_STORE_ID`) quanto lojas legadas com `BLOB_READ_WRITE_TOKEN`. Em deployments atuais da Vercel, conectar um Blob Store ao projeto é suficiente para o SDK autenticar operações de servidor via OIDC.

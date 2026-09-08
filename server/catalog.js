@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { del, list, put } from '@vercel/blob';
+import { del, get, list, put } from '@vercel/blob';
 import { isAdminConfigured } from './auth.js';
 import { driveThumbnailUrl, parseGoogleDriveLink, probePublicFile } from './googleDrive.js';
 import { ensureSupportedExtension, extension, extensionForMime, formatForFile, isSupportedName, mimeForName } from './formats.js';
@@ -17,6 +17,60 @@ let seedPromise = null;
 let dynamicCache = { at: 0, files: null };
 let syncSnapshotCache = { at: 0, files: null };
 let sourceCache = { at: 0, sources: null };
+
+let metadataBlobAccess = null;
+
+function metadataPutOptions(access) {
+  return {
+    access,
+    addRandomSuffix: false,
+    contentType: 'application/json',
+    cacheControlMaxAge: 31536000
+  };
+}
+
+async function putMetadataBlob(pathname, value) {
+  const preferred = metadataBlobAccess ? [metadataBlobAccess] : ['public', 'private'];
+  let lastError = null;
+  for (const access of preferred) {
+    try {
+      const result = await put(pathname, value, metadataPutOptions(access));
+      metadataBlobAccess = access;
+      return result;
+    } catch (error) {
+      lastError = error;
+      // O acesso do Blob Store é fixo. Se a primeira tentativa usar o modo
+      // oposto ao da Store, tenta o outro automaticamente.
+      if (metadataBlobAccess) break;
+    }
+  }
+  throw lastError || new Error('Falha ao salvar metadados no Vercel Blob.');
+}
+
+async function readPrivateJson(pathname) {
+  const result = await get(pathname, { access: 'private', useCache: false });
+  if (!result?.stream) throw new Error('Metadado privado não encontrado.');
+  const raw = await new Response(result.stream).text();
+  return JSON.parse(raw);
+}
+
+async function fetchJsonBlob(blob) {
+  // Stores públicos podem ser lidos diretamente pela URL. Stores privados usam
+  // get() autenticado via OIDC/token. Isso permite o mesmo código nos dois modos.
+  if (blob?.url) {
+    try {
+      const response = await fetch(blob.url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+      if (response.ok) {
+        metadataBlobAccess = metadataBlobAccess || 'public';
+        return response.json();
+      }
+    } catch {}
+  }
+  if (!blob?.pathname) throw new Error('Metadado sem pathname.');
+  const value = await readPrivateJson(blob.pathname);
+  metadataBlobAccess = 'private';
+  return value;
+}
 
 export function isBlobConfigured() {
   // Vercel Blob pode autenticar de duas formas:
@@ -72,7 +126,7 @@ async function dynamicRevisions({ force = false } = {}) {
   const revisions = [];
   for (let offset = 0; offset < blobs.length; offset += 20) {
     const batch = blobs.slice(offset, offset + 20);
-    const values = await Promise.allSettled(batch.map((blob) => fetchJson(blob.url)));
+    const values = await Promise.allSettled(batch.map((blob) => fetchJsonBlob(blob)));
     for (const value of values) if (value.status === 'fulfilled' && value.value?.id) revisions.push(value.value);
   }
   dynamicCache = { at: Date.now(), files: revisions };
@@ -89,7 +143,7 @@ async function dynamicSourceRevisions({ force = false } = {}) {
   const revisions = [];
   for (let offset = 0; offset < blobs.length; offset += 20) {
     const batch = blobs.slice(offset, offset + 20);
-    const values = await Promise.allSettled(batch.map((blob) => fetchJson(blob.url)));
+    const values = await Promise.allSettled(batch.map((blob) => fetchJsonBlob(blob)));
     for (const value of values) if (value.status === 'fulfilled' && value.value?.id) revisions.push(value.value);
   }
   sourceCache = { at: Date.now(), sources: revisions };
@@ -111,12 +165,7 @@ export async function saveCatalogSource(source) {
   if (!isBlobConfigured() || !source?.id) return false;
   const revision = { ...source, _revisionAt: new Date().toISOString() };
   const pathname = `${SOURCE_REVISION_PREFIX}${encodeURIComponent(source.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
-  await put(pathname, JSON.stringify(revision), {
-    access: 'public',
-    addRandomSuffix: false,
-    contentType: 'application/json',
-    cacheControlMaxAge: 31536000
-  });
+  await putMetadataBlob(pathname, JSON.stringify(revision));
   sourceCache = { at: 0, sources: null };
   return true;
 }
@@ -136,7 +185,7 @@ async function latestSyncSnapshot({ force = false } = {}) {
     return bt - at;
   })[0];
   try {
-    const value = await fetchJson(latest.url);
+    const value = await fetchJsonBlob(latest);
     const files = Array.isArray(value?.files) ? value.files : [];
     syncSnapshotCache = { at: Date.now(), files };
     return files;
@@ -151,12 +200,7 @@ export async function saveSyncSnapshot(files) {
   const unique = [...new Map((files || []).filter((file) => file?.id).map((file) => [file.id, file])).values()];
   const payload = { syncedAt: new Date().toISOString(), files: unique };
   const pathname = `${SYNC_SNAPSHOT_PREFIX}${Date.now()}-${crypto.randomUUID()}.json`;
-  await put(pathname, JSON.stringify(payload), {
-    access: 'public',
-    addRandomSuffix: false,
-    contentType: 'application/json',
-    cacheControlMaxAge: 31536000
-  });
+  await putMetadataBlob(pathname, JSON.stringify(payload));
   syncSnapshotCache = { at: Date.now(), files: unique };
   return true;
 }
@@ -240,7 +284,7 @@ export async function writeRevision(file) {
   if (!isBlobConfigured()) { const e = new Error('Conecte um Vercel Blob ao projeto para salvar alterações.'); e.code = 'BLOB_NOT_CONFIGURED'; e.status = 503; throw e; }
   const revision = { ...file, _revisionAt: new Date().toISOString() };
   const pathname = `${REVISION_PREFIX}${encodeURIComponent(file.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
-  await put(pathname, JSON.stringify(revision), { access: 'public', addRandomSuffix: false, contentType: 'application/json', cacheControlMaxAge: 31536000 });
+  await putMetadataBlob(pathname, JSON.stringify(revision));
   dynamicCache = { at: 0, files: null };
   syncSnapshotCache = { at: 0, files: null };
   return revision;
