@@ -1,7 +1,7 @@
 import { AlertTriangle, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api.js';
-import { loadPdf } from '../services/pdf.js';
+import { isIOSSafari, loadPdf } from '../services/pdf.js';
 
 function useVisible(rootMargin = '700px') {
   const ref = useRef(null);
@@ -54,7 +54,7 @@ function PdfCanvas({ documentUrl, pageNumber, zoom, fitMode = 'single' }) {
         const viewport = page.getViewport({ scale });
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const ratio = window.devicePixelRatio || 1;
+        const ratio = Math.min(window.devicePixelRatio || 1, isIOSSafari() ? 1.5 : 2);
         canvas.width = Math.floor(viewport.width * ratio);
         canvas.height = Math.floor(viewport.height * ratio);
         canvas.style.width = `${Math.floor(viewport.width)}px`;

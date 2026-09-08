@@ -147,3 +147,12 @@ As HQs já catalogadas continuam usando seus arquivos públicos do Drive como or
 ## Vercel / npm 11 — esbuild
 
 O projeto aprova explicitamente o script de instalação do `esbuild@0.25.12` no `package.json` por meio de `allowScripts`. Isso evita que builds com npm 11 parem ou emitam pendência de aprovação antes do `vite build`.
+
+
+## Correção iOS Safari (2.0.3)
+
+- PDF.js passa a usar o build `legacy` para maior compatibilidade com Safari/iOS.
+- Polyfill de `Promise.withResolvers` antes do carregamento do PDF.js.
+- No Safari iOS, o leitor desativa streaming contínuo e prioriza requisições HTTP Range.
+- Timeout de abertura evita spinner infinito.
+- Canvas limita o DPR em iPhone/iPad para reduzir uso de memória em telas Retina.
