@@ -119,7 +119,7 @@ async function getComic(id) {
 }
 
 async function syncLibrarySources() {
-  const result = await request('/api/library-sync', { method: 'POST', admin: true, timeout: 290_000 });
+  const result = await request('/api/library', { method: 'POST', admin: true, timeout: 290_000 });
   if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
   return result;
 }

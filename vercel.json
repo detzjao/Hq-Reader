@@ -12,7 +12,7 @@
     "api/library-import.js": {
       "maxDuration": 300
     },
-    "api/library-sync.js": {
+    "api/library.js": {
       "maxDuration": 300
     }
   },
