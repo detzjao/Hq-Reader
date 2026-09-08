@@ -11,9 +11,32 @@ import { api } from '../services/api.js';
 import { isIOSSafari, loadPdf } from '../services/pdf.js';
 
 const MIN_ZOOM = 50;
-const MAX_ZOOM = 300;
+const MAX_ZOOM = 500;
 const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
+
+function pdfOutputScale(viewport, fitMode = 'single') {
+  const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
+  if (fitMode === 'thumbnail') return Math.min(dpr, 1.5);
+
+  const iosSafari = isIOSSafari();
+  // Renderiza a página acima da resolução CSS para manter balões e letras nítidos.
+  // O limite adaptativo evita estourar a memória/canvas em iPhones e em zooms altos.
+  const target = iosSafari
+    ? Math.min(2.25, Math.max(1.75, dpr * 1.1))
+    : Math.min(3, Math.max(2, dpr * 1.35));
+  const maxPixels = iosSafari ? 16_000_000 : 42_000_000;
+  const maxDimension = iosSafari ? 4096 : 8192;
+  const width = Math.max(1, viewport.width);
+  const height = Math.max(1, viewport.height);
+  const budget = Math.min(
+    maxDimension / width,
+    maxDimension / height,
+    Math.sqrt(maxPixels / (width * height))
+  );
+  return Math.max(0.75, Math.min(target, budget));
+}
+
 
 function useVisible(rootMargin = '700px') {
   const ref = useRef(null);
@@ -55,7 +78,7 @@ function PdfCanvas({ documentUrl, pageNumber, zoom, fitMode = 'single' }) {
         if (fitMode === 'thumbnail') {
           scale = Math.min(0.28, 140 / baseViewport.width);
         } else if (fitMode === 'vertical') {
-          const maxWidth = Math.min(1000, Math.max(280, window.innerWidth - 28));
+          const maxWidth = Math.min(1400, Math.max(280, window.innerWidth - 28));
           scale = (maxWidth / baseViewport.width) * (zoom / 100);
         } else {
           const maxWidth = Math.max(280, window.innerWidth - 24);
@@ -66,12 +89,15 @@ function PdfCanvas({ documentUrl, pageNumber, zoom, fitMode = 'single' }) {
         const viewport = page.getViewport({ scale });
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const ratio = Math.min(window.devicePixelRatio || 1, isIOSSafari() ? 1.5 : 2);
+        const ratio = pdfOutputScale(viewport, fitMode);
         canvas.width = Math.floor(viewport.width * ratio);
         canvas.height = Math.floor(viewport.height * ratio);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
-        const context = canvas.getContext('2d');
+        const context = canvas.getContext('2d', { alpha: false });
+        if (!context) throw new Error('Canvas indisponível.');
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
         renderRef.current?.cancel?.();
         renderRef.current = page.render({
           canvasContext: context,

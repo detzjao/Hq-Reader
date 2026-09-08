@@ -8,7 +8,7 @@ import ProgressBar from './ProgressBar.jsx';
 import ReaderToolbar from './ReaderToolbar.jsx';
 import ThumbnailSidebar from './ThumbnailSidebar.jsx';
 
-const clampZoom = (value) => Math.min(300, Math.max(50, value));
+const clampZoom = (value) => Math.min(500, Math.max(50, value));
 
 export default function Reader({ comic, pages, documentUrl }) {
   const navigate = useNavigate();
