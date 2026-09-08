@@ -1,6 +1,6 @@
 {
   "name": "hq-reader-vercel",
-  "version": "2.1.4",
+  "version": "2.1.3",
   "private": true,
   "type": "module",
   "workspaces": [

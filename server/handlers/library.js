@@ -1,6 +1,5 @@
-import { assertAdminRequest } from '../auth.js';
 import { libraryStatus } from '../catalog.js';
-import { registerPublicFolderSources, syncConfiguredSources } from '../publicFolderSync.js';
+import { syncConfiguredSources } from '../publicFolderSync.js';
 import { sendError } from '../http.js';
 
 export const config = { maxDuration: 300 };
@@ -14,13 +13,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-      if (body.action === 'register-sources') {
-        assertAdminRequest(req);
-        const result = await registerPublicFolderSources(body.sources || []);
-        res.setHeader('Cache-Control', 'private, no-store');
-        return res.status(200).json(result);
-      }
-      const result = await syncConfiguredSources({ sourceIds: body.sourceIds || [] });
+      const result = await syncConfiguredSources({ extraSources: body.sources || [], sourceIds: body.sourceIds || [] });
       res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json(result);
     }

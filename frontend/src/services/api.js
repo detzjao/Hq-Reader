@@ -1,8 +1,8 @@
 import { upload } from '@vercel/blob/client';
 
 const ADMIN_STORAGE_KEY = 'hq-reader:admin-token';
-const LEGACY_DISCOVERED_STORAGE_KEY = 'hq-reader:drive-sync-files';
-const LEGACY_CUSTOM_SOURCES_STORAGE_KEY = 'hq-reader:custom-drive-sources';
+const DISCOVERED_STORAGE_KEY = 'hq-reader:drive-sync-files';
+const CUSTOM_SOURCES_STORAGE_KEY = 'hq-reader:custom-drive-sources';
 
 const MARVEL_EXTRA_PARENT_ID = '1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6';
 const MARVEL_DRIVE_SOURCE_ID = '1wXs64lZ0nOBAAWwGutDHfjO-TnfYO6Ee';
@@ -60,36 +60,48 @@ export function setAdminToken(value) {
   return clean;
 }
 
-function getLegacyCustomSources() {
+function getDiscoveredComics() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(LEGACY_CUSTOM_SOURCES_STORAGE_KEY) || '[]');
+    const parsed = JSON.parse(localStorage.getItem(DISCOVERED_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.name) : [];
+  } catch { return []; }
+}
+
+function saveDiscoveredComics(files, { replace = false } = {}) {
+  const byId = new Map();
+  if (!replace) for (const item of getDiscoveredComics()) byId.set(item.id, item);
+  for (const item of files || []) if (item?.id && item?.name) byId.set(item.id, item);
+  const unique = [...byId.values()];
+  try { localStorage.setItem(DISCOVERED_STORAGE_KEY, JSON.stringify(unique)); } catch {}
+  return unique;
+}
+
+function getCustomSources() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CUSTOM_SOURCES_STORAGE_KEY) || '[]');
     return Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.url) : [];
   } catch { return []; }
 }
 
-function clearLegacyDeviceCaches() {
-  try {
-    localStorage.removeItem(LEGACY_CUSTOM_SOURCES_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_DISCOVERED_STORAGE_KEY);
-  } catch {}
+function saveCustomSource(source) {
+  if (!source?.id || !source?.url) return getCustomSources();
+  const byId = new Map(getCustomSources().map((item) => [item.id, item]));
+  byId.set(source.id, source);
+  const sources = [...byId.values()];
+  try { localStorage.setItem(CUSTOM_SOURCES_STORAGE_KEY, JSON.stringify(sources)); } catch {}
+  return sources;
 }
 
-async function migrateLegacyCustomSources() {
-  const sources = getLegacyCustomSources();
-  if (!sources.length || !getAdminToken()) return false;
-  try {
-    const result = await request('/api/library', {
-      method: 'POST',
-      admin: true,
-      timeout: 60_000,
-      body: JSON.stringify({ action: 'register-sources', sources })
-    });
-    if (Number(result?.saved || 0) > 0 || !result?.failed?.length) {
-      clearLegacyDeviceCaches();
-      return true;
-    }
-  } catch {}
-  return false;
+function findDiscoveredComic(id) {
+  return getDiscoveredComics().find((item) => item.id === id) || null;
+}
+
+function mergeComics(serverFiles = []) {
+  const byId = new Map((serverFiles || []).map((item) => [item.id, item]));
+  for (const comic of getDiscoveredComics()) {
+    if (!byId.has(comic.id)) byId.set(comic.id, comic);
+  }
+  return [...byId.values()];
 }
 
 async function parseError(response) {
@@ -150,25 +162,24 @@ export async function uploadThumbnailBlob(blob, filename) {
 }
 
 async function getComics(fresh = false) {
-  return request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`);
+  const response = await request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`);
+  return { ...response, files: mergeComics(response.files || []) };
 }
 
 async function getComic(id) {
+  const discovered = findDiscoveredComic(id);
+  if (discovered) return { comic: discovered };
   return request(`/api/comic?id=${encodeURIComponent(id)}`);
 }
 
 async function syncLibrarySources({ onProgress } = {}) {
+  const customSources = getCustomSources();
   let status = { sources: [] };
   try { status = await request('/api/library', { timeout: 30_000 }); } catch {}
 
-  // Migra uma única vez os Drives que versões antigas deixaram presos apenas neste
-  // navegador. Depois disso, a lista de fontes vem exclusivamente do servidor.
-  if (await migrateLegacyCustomSources()) {
-    try { status = await request(`/api/library?fresh=${Date.now()}`, { timeout: 30_000 }); } catch {}
-  }
-
   const sourceById = new Map();
   for (const source of status.sources || []) if (source?.id) sourceById.set(source.id, source);
+  for (const source of customSources) if (source?.id) sourceById.set(source.id, source);
   splitLegacyMarvelExtraSource(sourceById);
   const sources = [...sourceById.values()];
 
@@ -178,8 +189,9 @@ async function syncLibrarySources({ onProgress } = {}) {
     const result = await request('/api/library', {
       method: 'POST',
       timeout: 290_000,
-      body: JSON.stringify({ action: 'sync' })
+      body: JSON.stringify({ action: 'sync', sources: customSources })
     });
+    if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
     return result;
   }
 
@@ -195,10 +207,11 @@ async function syncLibrarySources({ onProgress } = {}) {
       const result = await request('/api/library', {
         method: 'POST',
         timeout: 290_000,
-        body: JSON.stringify({ action: 'sync', sourceIds: [source.id] })
+        body: JSON.stringify({ action: 'sync', sources: customSources, sourceIds: [source.id] })
       });
       for (const file of result.files || []) if (file?.id) allFiles.set(file.id, file);
-        summaries.push(...(result.sources || []));
+      if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
+      summaries.push(...(result.sources || []));
       added += Number(result.added || 0);
       total = Math.max(total, Number(result.total || 0));
       persisted = persisted || Boolean(result.persisted);
@@ -229,10 +242,18 @@ async function addToLibrary({ url, name, path }) {
     timeout: 290_000,
     body: JSON.stringify({ url, name, path })
   });
-  if (result?.type === 'folder' && result.sourcePersisted !== true) {
-    throw new ApiError('O Drive não foi salvo na biblioteca compartilhada.', { status: 503, code: 'PERSISTENT_LIBRARY_UNAVAILABLE' });
+  if (result?.type === 'folder') {
+    if (result.source) saveCustomSource(result.source);
+    if (Array.isArray(result.sync?.files)) saveDiscoveredComics(result.sync.files);
   }
   return result;
+}
+
+function directParams(comic) {
+  if (!comic?.discoveredBySync) return '';
+  const params = new URLSearchParams({ direct: '1' });
+  if (comic.resourceKey) params.set('resourceKey', comic.resourceKey);
+  return `&${params.toString()}`;
 }
 
 export const api = {
@@ -240,12 +261,19 @@ export const api = {
   getComics,
   getComic,
   syncLibrarySources,
-  getArchivePages: (id) => request(`/api/archive?id=${encodeURIComponent(id)}`, { timeout: 120_000 }),
+  getArchivePages: (id) => {
+    const comic = findDiscoveredComic(id);
+    const extra = comic ? `${directParams(comic)}&name=${encodeURIComponent(comic.name)}` : '';
+    return request(`/api/archive?id=${encodeURIComponent(id)}${extra}`, { timeout: 120_000 });
+  },
   getLibraryStatus: () => request('/api/library'),
   addToLibrary,
   importLibrary: (text) => request('/api/library-import', { method: 'POST', admin: true, body: JSON.stringify({ text }), timeout: 60_000 }),
   registerUpload: ({ blob, originalName, size, path, thumbnailUrl }) => request('/api/library-upload-meta', { method: 'POST', admin: true, body: JSON.stringify({ blob, originalName, size, path, thumbnailUrl }) }),
   removeFromLibrary: (id) => request(`/api/library-delete?id=${encodeURIComponent(id)}`, { method: 'DELETE', admin: true }),
   assetUrl: (value = '') => /^https?:\/\//i.test(value) ? value : value,
-  downloadUrl: (id) => `/api/download?id=${encodeURIComponent(id)}`
+  downloadUrl: (id) => {
+    const comic = findDiscoveredComic(id);
+    return `/api/download?id=${encodeURIComponent(id)}${comic ? directParams(comic) : ''}`;
+  }
 };

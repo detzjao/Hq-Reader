@@ -214,7 +214,3 @@ A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **
 A varredura de pastas públicas não depende mais de o nome visível terminar em `.pdf`, `.cbz`, `.cbr` ou extensão de imagem. Quando o Drive mostra um arquivo sem extensão, o servidor inspeciona o MIME e os primeiros bytes do arquivo e normaliza o formato antes de adicioná-lo ao catálogo.
 
 Também foi ampliado o parser do `embeddedfolderview`: além do bloco visual `flip-entry-title`, ele percorre todos os links de arquivo e subpasta presentes no HTML, no mesmo princípio usado por crawlers públicos modernos do Google Drive. Isso melhora principalmente coleções profundas, como o Marvel Comics Extra.
-
-## 2.1.4 — biblioteca compartilhada entre dispositivos
-
-Drives adicionados pela tela administrativa passam a ser registrados no catálogo persistente do servidor antes de serem considerados adicionados. A lista de fontes deixa de depender do `localStorage` do navegador, então computador, celular e outros dispositivos carregam a mesma biblioteca. Versões antigas que tenham fontes presas ao navegador são migradas automaticamente quando o administrador autenticado executa uma sincronização.
