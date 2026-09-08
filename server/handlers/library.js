@@ -1,4 +1,3 @@
-import { assertAdminRequest } from '../auth.js';
 import { libraryStatus } from '../catalog.js';
 import { syncConfiguredSources } from '../publicFolderSync.js';
 import { sendError } from '../http.js';
@@ -13,8 +12,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      assertAdminRequest(req);
-      const result = await syncConfiguredSources();
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+      const result = await syncConfiguredSources({ extraSources: body.sources || [] });
       res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json(result);
     }

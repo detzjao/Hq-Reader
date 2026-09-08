@@ -1,4 +1,4 @@
-import { publicComic, getCatalog, isBlobConfigured, saveSyncSnapshot } from './catalog.js';
+import { publicComic, getCatalog, isBlobConfigured, saveCatalogSource, saveSyncSnapshot } from './catalog.js';
 import { mimeForName } from './formats.js';
 
 const SUPPORTED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'cbz', 'cbr']);
@@ -55,6 +55,69 @@ function resourceKeyFromUrl(url = '') {
     const match = decodeHtml(url).match(/[?&]resourcekey=([^&#]+)/i);
     try { return match?.[1] ? decodeURIComponent(match[1]) : ''; } catch { return match?.[1] || ''; }
   }
+}
+
+
+export function parsePublicFolderLink(input) {
+  const value = String(input || '').trim();
+  if (!value) {
+    const error = new Error('Informe um link público de pasta do Google Drive.');
+    error.code = 'INVALID_DRIVE_FOLDER';
+    error.status = 400;
+    throw error;
+  }
+
+  if (/^[A-Za-z0-9_-]{10,}$/.test(value)) {
+    return { id: value, url: `https://drive.google.com/drive/folders/${value}`, resourceKey: '' };
+  }
+
+  let url;
+  try { url = new URL(value); } catch {
+    const error = new Error('O link da pasta do Google Drive não é válido.');
+    error.code = 'INVALID_DRIVE_FOLDER';
+    error.status = 400;
+    throw error;
+  }
+  if (!['drive.google.com', 'docs.google.com'].includes(url.hostname.toLowerCase())) {
+    const error = new Error('O link precisa apontar para uma pasta pública do Google Drive.');
+    error.code = 'INVALID_DRIVE_FOLDER';
+    error.status = 400;
+    throw error;
+  }
+  const id = url.pathname.match(/\/folders\/([A-Za-z0-9_-]{10,})/i)?.[1]
+    || (/embeddedfolderview/i.test(url.pathname) ? String(url.searchParams.get('id') || '') : '');
+  if (!/^[A-Za-z0-9_-]{10,}$/.test(id)) {
+    const error = new Error('Não foi possível identificar a pasta nesse link do Google Drive.');
+    error.code = 'INVALID_DRIVE_FOLDER';
+    error.status = 400;
+    throw error;
+  }
+  return {
+    id,
+    url: value,
+    resourceKey: url.searchParams.get('resourcekey') || url.searchParams.get('resourceKey') || ''
+  };
+}
+
+function cleanPath(value = '') {
+  return String(value || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/');
+}
+
+export function normalizePublicFolderSource(input = {}) {
+  const parsed = parsePublicFolderLink(input.url || input.id || '');
+  const requestedPath = cleanPath(input.path || '');
+  const requestedCategory = cleanPath(input.category || '').split('/')[0];
+  const category = requestedCategory || requestedPath.split('/')[0] || String(input.label || '').trim() || 'Outros';
+  const label = String(input.label || '').trim() || requestedPath.split('/').filter(Boolean).at(-1) || category || `Drive ${parsed.id.slice(-6)}`;
+  return {
+    id: parsed.id,
+    label,
+    category,
+    path: requestedPath || category,
+    url: parsed.url,
+    resourceKey: input.resourceKey || parsed.resourceKey || '',
+    enabled: input.enabled !== false
+  };
 }
 
 function folderViewCandidates(folderId, resourceKey = '') {
@@ -178,7 +241,7 @@ async function crawlSource(source) {
   const concurrency = Math.max(1, Math.min(8, Number(process.env.PUBLIC_FOLDER_CONCURRENCY || 5)));
   const visitedFolders = new Set();
   const files = new Map();
-  let frontier = [{ id: source.id, path: source.category, resourceKey: source.resourceKey || '' }];
+  let frontier = [{ id: source.id, path: source.path || source.category, resourceKey: source.resourceKey || '' }];
   let failedFolders = 0;
 
   while (frontier.length) {
@@ -268,9 +331,22 @@ function transientPublicComic(file) {
   return comic;
 }
 
-export async function syncConfiguredSources() {
+export async function syncConfiguredSources({ extraSources = [] } = {}) {
   const catalog = await getCatalog({ force: true });
-  const sources = (catalog.sources || []).filter((source) => source?.enabled !== false && source?.id && source?.category);
+  const sourceById = new Map();
+  for (const source of catalog.sources || []) {
+    if (source?.enabled === false || !source?.id || !source?.category) continue;
+    sourceById.set(source.id, normalizePublicFolderSource(source));
+  }
+  for (const input of Array.isArray(extraSources) ? extraSources.slice(0, 20) : []) {
+    try {
+      const source = normalizePublicFolderSource(input);
+      if (source.enabled !== false) sourceById.set(source.id, source);
+    } catch {
+      // Ignora fontes locais antigas ou inválidas sem derrubar a sincronização das demais.
+    }
+  }
+  const sources = [...sourceById.values()];
   if (!sources.length) return { ok: true, files: [], sources: [], added: 0, found: 0, total: catalog.files.length, persisted: false };
 
   const results = await Promise.allSettled(sources.map(crawlSource));
@@ -320,3 +396,15 @@ export async function syncConfiguredSources() {
     persisted
   };
 }
+
+export async function addPublicFolderSource({ url, label = '', path = '', category = '' } = {}) {
+  const source = normalizePublicFolderSource({ url, label, path, category });
+  let sourcePersisted = false;
+  if (isBlobConfigured()) {
+    try { sourcePersisted = await saveCatalogSource(source); } catch { sourcePersisted = false; }
+  }
+  const sync = await syncConfiguredSources({ extraSources: sourcePersisted ? [] : [source] });
+  const sourceSummary = (sync.sources || []).find((item) => item.id === source.id) || null;
+  return { source, sourcePersisted, sourceSummary, sync };
+}
+

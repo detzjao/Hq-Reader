@@ -12,9 +12,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INITIAL_PATH = path.resolve(__dirname, '../data/initial-library.json');
 const REVISION_PREFIX = 'hq-reader/catalog-revisions/';
 const SYNC_SNAPSHOT_PREFIX = 'hq-reader/sync-snapshots/';
+const SOURCE_REVISION_PREFIX = 'hq-reader/source-revisions/';
 let seedPromise = null;
 let dynamicCache = { at: 0, files: null };
 let syncSnapshotCache = { at: 0, files: null };
+let sourceCache = { at: 0, sources: null };
 
 export function isBlobConfigured() {
   return Boolean(String(process.env.BLOB_READ_WRITE_TOKEN || '').trim());
@@ -67,6 +69,47 @@ async function dynamicRevisions({ force = false } = {}) {
   return revisions;
 }
 
+
+
+async function dynamicSourceRevisions({ force = false } = {}) {
+  if (!isBlobConfigured()) return [];
+  const ttl = Number(process.env.CATALOG_CACHE_MS || 20_000);
+  if (!force && sourceCache.sources && Date.now() - sourceCache.at < ttl) return sourceCache.sources;
+  const blobs = await listAllBlobs(SOURCE_REVISION_PREFIX);
+  const revisions = [];
+  for (let offset = 0; offset < blobs.length; offset += 20) {
+    const batch = blobs.slice(offset, offset + 20);
+    const values = await Promise.allSettled(batch.map((blob) => fetchJson(blob.url)));
+    for (const value of values) if (value.status === 'fulfilled' && value.value?.id) revisions.push(value.value);
+  }
+  sourceCache = { at: Date.now(), sources: revisions };
+  return revisions;
+}
+
+function latestSourceById(revisions) {
+  const latest = new Map();
+  for (const revision of revisions) {
+    const previous = latest.get(revision.id);
+    const currentTime = Date.parse(revision._revisionAt || revision.updatedAt || 0) || 0;
+    const previousTime = Date.parse(previous?._revisionAt || previous?.updatedAt || 0) || 0;
+    if (!previous || currentTime >= previousTime) latest.set(revision.id, revision);
+  }
+  return latest;
+}
+
+export async function saveCatalogSource(source) {
+  if (!isBlobConfigured() || !source?.id) return false;
+  const revision = { ...source, _revisionAt: new Date().toISOString() };
+  const pathname = `${SOURCE_REVISION_PREFIX}${encodeURIComponent(source.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
+  await put(pathname, JSON.stringify(revision), {
+    access: 'public',
+    addRandomSuffix: false,
+    contentType: 'application/json',
+    cacheControlMaxAge: 31536000
+  });
+  sourceCache = { at: 0, sources: null };
+  return true;
+}
 
 async function latestSyncSnapshot({ force = false } = {}) {
   if (!isBlobConfigured()) return [];
@@ -148,6 +191,13 @@ export function publicComic(file) {
 
 export async function getCatalog({ force = false } = {}) {
   const base = await seed();
+  const sourceById = new Map((base.sources || []).filter((source) => source?.id).map((source) => [source.id, { ...source }]));
+  const sourceLatest = latestSourceById(await dynamicSourceRevisions({ force }));
+  for (const [id, revision] of sourceLatest) {
+    if (revision.deleted) sourceById.delete(id);
+    else sourceById.set(id, { ...(sourceById.get(id) || {}), ...revision });
+  }
+  const sources = [...sourceById.values()];
   const byId = new Map(base.files.map((file) => [file.id, { ...file, category: normalizedCategory(file) }]));
   const syncedFiles = await latestSyncSnapshot({ force });
   for (const file of syncedFiles) {
@@ -166,7 +216,7 @@ export async function getCatalog({ force = false } = {}) {
     const br = categoryRank.get(normalizedCategory(b)) ?? 50;
     return ar - br || naturalSort(`${a.path || ''}/${a.name}`, `${b.path || ''}/${b.name}`);
   });
-  return { version: base.version, updatedAt: base.updatedAt, sources: base.sources, files };
+  return { version: base.version, updatedAt: base.updatedAt, sources, files };
 }
 
 export async function getComic(id) {

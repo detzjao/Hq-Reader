@@ -190,3 +190,13 @@ O botão **Atualizar base de dados** varre estas fontes públicas do Google Driv
 
 A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **MARVEL DRIVE**.
 
+## Sincronização automática dos Drives (v2.1.0)
+
+- Ao abrir a biblioteca, o frontend carrega o catálogo existente imediatamente e inicia em segundo plano uma varredura de todas as fontes públicas configuradas.
+- A varredura automática percorre subpastas e reúne PDF, CBZ, CBR e imagens suportadas sem exigir que o usuário clique primeiro em “Atualizar base de dados”.
+- As quatro fontes padrão continuam sendo Marvel Comics, Marvel Comics Extra, DC Comics e Turma da Mônica.
+- A tela “Adicionar por link” agora aceita tanto um arquivo individual quanto o link de uma pasta inteira do Google Drive.
+- Ao adicionar uma pasta, ela é percorrida recursivamente e as HQs encontradas entram na biblioteca. A pasta também fica registrada no navegador para novas varreduras automáticas.
+- Quando o deploy possui armazenamento persistente, novas fontes adicionadas pelo administrador também são registradas no catálogo do servidor.
+- A aplicação continua exibindo o catálogo já disponível caso alguma pasta pública esteja temporariamente indisponível durante a sincronização automática.
+

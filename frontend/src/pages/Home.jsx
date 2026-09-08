@@ -8,6 +8,7 @@ import SearchBar from '../components/SearchBar.jsx';
 import { api } from '../services/api.js';
 
 const CATEGORY_ORDER = ['Marvel', 'DC Comics', 'Turma da Mônica', 'Outros'];
+const AUTO_SYNC_SESSION_KEY = 'hq-reader:auto-drive-sync';
 
 export default function Home() {
   const [comics, setComics] = useState([]);
@@ -28,10 +29,32 @@ export default function Home() {
   }
 
   useEffect(() => {
+    let active = true;
     load();
+
+    async function syncDrivesOnStart() {
+      try {
+        if (sessionStorage.getItem(AUTO_SYNC_SESSION_KEY) === '1') return;
+        sessionStorage.setItem(AUTO_SYNC_SESSION_KEY, '1');
+      } catch {}
+
+      try {
+        await api.syncLibrarySources();
+        if (!active) return;
+        const data = await api.getComics(true);
+        if (active) setComics(data.files || []);
+      } catch {
+        // A biblioteca inicial continua utilizável mesmo se uma pasta pública estiver temporariamente indisponível.
+      }
+    }
+
+    syncDrivesOnStart();
     const handleUpdate = () => load({ silent: true });
     window.addEventListener('hq-reader:library-updated', handleUpdate);
-    return () => window.removeEventListener('hq-reader:library-updated', handleUpdate);
+    return () => {
+      active = false;
+      window.removeEventListener('hq-reader:library-updated', handleUpdate);
+    };
   }, []);
 
   const categories = useMemo(() => {

@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, getAdminToken, setAdminToken, uploadBlobFile, uploadThumbnailBlob } from '../services/api.js';
 import { loadPdf } from '../services/pdf.js';
 
-const EXAMPLE_LINK = 'https://drive.google.com/file/d/ID_DO_ARQUIVO/view';
+const EXAMPLE_LINK = 'https://drive.google.com/drive/folders/ID_DA_PASTA ou https://drive.google.com/file/d/ID_DO_ARQUIVO/view';
 const CATEGORY_SUGGESTIONS = ['Marvel', 'DC Comics', 'Turma da Mônica'];
 const ACCEPTED_FILES = '.pdf,.cbz,.cbr,.jpg,.jpeg,.png,.webp,.gif';
 const ADMIN_PASSWORD = '@detzjao1';
@@ -132,8 +132,13 @@ export default function LibraryManager() {
     if (!url.trim() || !canWrite()) return;
     setSaving(true); setError(''); setMessage('');
     try {
-      await api.addToLibrary({ url: url.trim(), name: name.trim(), path: collection.trim() });
-      setMessage('HQ adicionada à biblioteca.');
+      const response = await api.addToLibrary({ url: url.trim(), name: name.trim(), path: collection.trim() });
+      if (response?.type === 'folder') {
+        const found = Number(response.sourceSummary?.files || 0);
+        setMessage(`Drive adicionado e varrido. ${found} ${found === 1 ? 'HQ encontrada' : 'HQs encontradas'} nessa pasta.`);
+      } else {
+        setMessage('HQ adicionada à biblioteca.');
+      }
       setUrl(''); setName('');
       notifyUpdate(); await refresh(true);
     } catch (err) { setError(err.message); }
@@ -218,7 +223,7 @@ export default function LibraryManager() {
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><RefreshCw className="h-5 w-5" /></span>
             <div>
               <h3 className="text-lg font-bold text-white">Base de dados</h3>
-              <p className="mt-0.5 text-sm text-zinc-500">Varre novamente as pastas da Marvel, DC Comics e Turma da Mônica e procura novas HQs.</p>
+              <p className="mt-0.5 text-sm text-zinc-500">Varre todas as fontes padrão e também os Drives inteiros adicionados por você.</p>
             </div>
           </div>
           <button
@@ -246,11 +251,11 @@ export default function LibraryManager() {
       </section>
 
       <section className="border-t border-white/5 pt-5">
-        <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><LibraryBig className="h-5 w-5" /></span><div><h3 className="text-lg font-bold text-white">Adicionar por link</h3><p className="mt-0.5 text-sm text-zinc-500">Adicione um arquivo público do Google Drive.</p></div></div>
+        <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><LibraryBig className="h-5 w-5" /></span><div><h3 className="text-lg font-bold text-white">Adicionar por link</h3><p className="mt-0.5 text-sm text-zinc-500">Adicione uma HQ individual ou uma pasta inteira pública do Google Drive. Pastas são percorridas com subpastas e vários quadrinhos.</p></div></div>
         <form onSubmit={handleAdd} className="mt-5 space-y-4">
-          <div><label className="mb-2 block text-xs font-semibold text-zinc-300">Link do arquivo</label><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={EXAMPLE_LINK} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" /></div>
-          <div className="grid gap-4 sm:grid-cols-2"><div><label className="mb-2 block text-xs font-semibold text-zinc-300">Nome <span className="font-normal text-zinc-600">(opcional)</span></label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Batman #001.pdf" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" /></div><div><label className="mb-2 block text-xs font-semibold text-zinc-300">Categoria / coleção</label><input value={collection} onChange={(e) => setCollection(e.target.value)} list="hq-category-suggestions" placeholder="DC Comics/Batman" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" /></div></div>
-          <button type="submit" disabled={saving || !url.trim() || !canWrite()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{saving ? 'Adicionando...' : 'Adicionar à biblioteca'}</button>
+          <div><label className="mb-2 block text-xs font-semibold text-zinc-300">Link do arquivo ou da pasta</label><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={EXAMPLE_LINK} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" /></div>
+          <div className="grid gap-4 sm:grid-cols-2"><div><label className="mb-2 block text-xs font-semibold text-zinc-300">Nome / rótulo <span className="font-normal text-zinc-600">(opcional)</span></label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Batman #001.pdf ou Marvel Completa" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" /></div><div><label className="mb-2 block text-xs font-semibold text-zinc-300">Categoria / coleção</label><input value={collection} onChange={(e) => setCollection(e.target.value)} list="hq-category-suggestions" placeholder="DC Comics/Batman" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" /></div></div>
+          <button type="submit" disabled={saving || !url.trim() || !canWrite()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{saving ? 'Lendo Drive...' : 'Adicionar à biblioteca'}</button>
         </form>
       </section>
 
