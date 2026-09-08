@@ -1,4 +1,40 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const ENV_API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const STORAGE_KEY = 'hq-reader:api-base-url';
+
+function normalizeBase(value = '') {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+export function getStoredApiBaseUrl() {
+  try {
+    return normalizeBase(localStorage.getItem(STORAGE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+export function getApiBaseUrl() {
+  return getStoredApiBaseUrl() || ENV_API_BASE || '';
+}
+
+export function getConfiguredApiBaseUrl() {
+  return getStoredApiBaseUrl() || ENV_API_BASE || '';
+}
+
+export function setApiBaseUrl(value) {
+  const normalized = normalizeBase(value);
+  try {
+    if (normalized) localStorage.setItem(STORAGE_KEY, normalized);
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignora indisponibilidade do localStorage.
+  }
+  return normalized;
+}
+
+export function getBuildApiBaseUrl() {
+  return ENV_API_BASE;
+}
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR' } = {}) {
@@ -12,6 +48,14 @@ export class ApiError extends Error {
 async function parseErrorResponse(response) {
   let body = {};
   try { body = await response.json(); } catch { body = {}; }
+
+  if (!body?.error && response.status === 404 && !getApiBaseUrl() && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    return new ApiError('O backend da biblioteca não está configurado para esta publicação.', {
+      status: 404,
+      code: 'API_NOT_CONFIGURED'
+    });
+  }
+
   return new ApiError(body.error || `Erro HTTP ${response.status}.`, {
     status: response.status,
     code: body.code || 'HTTP_ERROR'
@@ -21,6 +65,7 @@ async function parseErrorResponse(response) {
 async function request(path, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeout ?? 20_000);
+  const API_BASE = getApiBaseUrl();
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...options,
@@ -32,6 +77,13 @@ async function request(path, options = {}) {
       }
     });
     if (!response.ok) throw await parseErrorResponse(response);
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new ApiError('A resposta recebida não veio do backend do HQ Reader. Configure o endereço do servidor.', {
+        status: response.status,
+        code: 'INVALID_API_RESPONSE'
+      });
+    }
     return response.json();
   } catch (error) {
     if (error instanceof ApiError) throw error;
@@ -45,6 +97,7 @@ async function request(path, options = {}) {
 async function uploadComic(file, collectionPath = '') {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30 * 60_000);
+  const API_BASE = getApiBaseUrl();
   try {
     const response = await fetch(`${API_BASE}/api/library/upload`, {
       method: 'POST',
@@ -90,6 +143,6 @@ export const api = {
     timeout: 120_000
   }),
   removeFromLibrary: (id) => request(`/api/library/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  assetUrl: (path) => `${API_BASE}${path}`,
-  downloadUrl: (id) => `${API_BASE}/api/comics/${encodeURIComponent(id)}/download`
+  assetUrl: (path) => `${getApiBaseUrl()}${path}`,
+  downloadUrl: (id) => `${getApiBaseUrl()}/api/comics/${encodeURIComponent(id)}/download`
 };

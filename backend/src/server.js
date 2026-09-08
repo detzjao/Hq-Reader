@@ -7,15 +7,41 @@ import { syncConfiguredSources } from './services/publicFolderSync.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
-const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+const configuredOrigins = String(
+  process.env.FRONTEND_ORIGIN || 'http://localhost:5173,https://hq-reader-seven.vercel.app'
+)
+  .split(',')
+  .map((value) => value.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+const allowVercelPreviews = String(process.env.ALLOW_VERCEL_PREVIEWS ?? 'true').toLowerCase() !== 'false';
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  const normalized = String(origin).replace(/\/$/, '');
+  if (configuredOrigins.includes('*') || configuredOrigins.includes(normalized)) return true;
+  if (allowVercelPreviews && /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized)) return true;
+  return false;
+}
 
 app.disable('x-powered-by');
-app.use(cors({ origin: frontendOrigin }));
+app.set('trust proxy', 1);
+app.use(cors({
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    const error = new Error('Origem não autorizada para acessar o HQ Reader.');
+    error.code = 'CORS_ORIGIN_DENIED';
+    error.status = 403;
+    return callback(error);
+  }
+}));
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, libraryMode: 'public-catalog', credentialsRequired: false });
-});
+function healthPayload() {
+  return { ok: true, libraryMode: 'public-catalog', credentialsRequired: false };
+}
+
+app.get('/health', (_req, res) => res.json(healthPayload()));
+app.get('/api/health', (_req, res) => res.json(healthPayload()));
 
 app.use('/api/comics', comicsRouter);
 app.use('/api/library', libraryRouter);

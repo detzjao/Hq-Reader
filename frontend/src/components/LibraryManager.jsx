@@ -6,11 +6,12 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Server,
   Trash2,
   UploadCloud
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../services/api.js';
+import { api, getConfiguredApiBaseUrl, setApiBaseUrl } from '../services/api.js';
 
 const EXAMPLE_LINK = 'https://drive.google.com/file/d/ID_DO_ARQUIVO/view';
 const CATEGORY_SUGGESTIONS = ['Marvel', 'DC Comics', 'Turma da Mônica'];
@@ -35,6 +36,8 @@ export default function LibraryManager() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState('');
+  const [apiBaseInput, setApiBaseInput] = useState(() => getConfiguredApiBaseUrl());
+  const [savingServer, setSavingServer] = useState(false);
   const fileInputRef = useRef(null);
 
   async function refresh() {
@@ -60,6 +63,26 @@ export default function LibraryManager() {
 
   function notifyUpdate() {
     window.dispatchEvent(new CustomEvent('hq-reader:library-updated'));
+  }
+
+  async function handleSaveServer() {
+    setSavingServer(true);
+    setError('');
+    setMessage('');
+    const previous = getConfiguredApiBaseUrl();
+    setApiBaseUrl(apiBaseInput);
+    try {
+      await api.health();
+      setMessage('Servidor conectado. A biblioteca será recarregada.');
+      notifyUpdate();
+      await refresh();
+    } catch (err) {
+      setApiBaseUrl(previous);
+      setApiBaseInput(previous);
+      setError(`Não foi possível conectar ao servidor informado. ${err.message}`);
+    } finally {
+      setSavingServer(false);
+    }
   }
 
   async function handleSync() {
@@ -182,6 +205,35 @@ export default function LibraryManager() {
       </datalist>
 
       <section>
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400">
+            <Server className="h-5 w-5" />
+          </span>
+          <div>
+            <h3 className="text-lg font-bold text-white">Servidor da biblioteca</h3>
+            <p className="mt-0.5 text-sm text-zinc-500">Use a URL pública do backend hospedado no Render.</p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <input
+            value={apiBaseInput}
+            onChange={(event) => setApiBaseInput(event.target.value)}
+            placeholder="https://seu-hq-reader.onrender.com"
+            className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-700 focus:border-red-500/60 focus:ring-2 focus:ring-red-500/10"
+          />
+          <button
+            type="button"
+            onClick={handleSaveServer}
+            disabled={savingServer || !apiBaseInput.trim()}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {savingServer ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+            {savingServer ? 'Testando...' : 'Conectar'}
+          </button>
+        </div>
+      </section>
+
+      <section className="border-t border-white/5 pt-5">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400">

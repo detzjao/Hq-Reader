@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: hq-reader-api
+    runtime: node
+    plan: free
+    buildCommand: npm install --prefix backend
+    startCommand: npm run start --prefix backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_ORIGIN
+        value: https://hq-reader-seven.vercel.app
+      - key: ALLOW_VERCEL_PREVIEWS
+        value: true
+      - key: SYNC_PUBLIC_FOLDERS_ON_START
+        value: false
+      - key: LIBRARY_WRITE_ENABLED
+        value: true

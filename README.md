@@ -126,3 +126,77 @@ Em hospedagens com disco efêmero, configure armazenamento persistente para esse
 - Importações, uploads e sincronizações agora atualizam `library.json` de forma serializada e atômica.
 - O catálogo inicial inclui HQs nas categorias Marvel, DC Comics e Turma da Mônica, evitando uma biblioteca vazia quando o Google bloqueia temporariamente a varredura pública.
 - A atualização das fontes tolera falhas isoladas de subpastas e mostra o erro específico de cada fonte na interface.
+
+## Publicação: Vercel + Render
+
+O projeto usa dois serviços em produção:
+
+- **Vercel**: frontend React/Vite.
+- **Render**: backend Express e catálogo da biblioteca.
+
+### 1. Render
+
+Crie um **Web Service** apontando para este repositório/projeto.
+
+Se usar o arquivo `render.yaml`, o serviço já recebe os comandos corretos. Se configurar manualmente:
+
+```text
+Build Command: npm install --prefix backend
+Start Command: npm run start --prefix backend
+Health Check: /api/health
+```
+
+Variáveis recomendadas no Render:
+
+```text
+FRONTEND_ORIGIN=https://hq-reader-seven.vercel.app
+ALLOW_VERCEL_PREVIEWS=true
+SYNC_PUBLIC_FOLDERS_ON_START=false
+LIBRARY_WRITE_ENABLED=true
+```
+
+Depois de publicar, abra no navegador:
+
+```text
+https://SEU-SERVICO.onrender.com/api/health
+```
+
+A resposta deve conter `"ok": true`.
+
+### 2. Vercel
+
+A causa mais comum de a biblioteca funcionar localmente e ficar vazia no Vercel é deixar `VITE_API_BASE_URL` vazio. O proxy de `/api` existente em `vite.config.js` funciona **somente no desenvolvimento local**.
+
+No projeto do Vercel, abra **Settings → Environment Variables** e crie:
+
+```text
+VITE_API_BASE_URL=https://hq-reader-api.onrender.com
+```
+
+Sem barra `/` no final. Depois faça um **Redeploy**, porque variáveis `VITE_*` são incorporadas durante o build.
+
+Este projeto também permite configurar a URL do Render em tempo de execução em:
+
+```text
+Configurações → Biblioteca → Servidor da biblioteca
+```
+
+Assim é possível trocar o backend sem alterar o código. A configuração fica salva no navegador e tem prioridade sobre `VITE_API_BASE_URL`.
+
+### 3. Teste de produção
+
+Confirme nesta ordem:
+
+```text
+https://SEU-SERVICO.onrender.com/api/health
+https://SEU-SERVICO.onrender.com/api/comics
+https://hq-reader-seven.vercel.app/
+```
+
+O endpoint `/api/comics` deve retornar o catálogo em JSON. O catálogo incluído nesta versão possui 698 HQs: 512 Marvel, 87 DC Comics e 99 Turma da Mônica.
+
+### Persistência no Render
+
+O catálogo que acompanha o deploy funciona normalmente sem disco persistente. Entretanto, alterações feitas depois do deploy — uploads, remoções e HQs adicionadas pela interface — podem ser perdidas quando um serviço Render com filesystem efêmero reinicia ou recebe novo deploy.
+
+Para persistir uploads e edições de catálogo entre reinicializações, use um Persistent Disk/armazenamento persistente e aponte `LIBRARY_CATALOG_FILE` e `LIBRARY_UPLOAD_DIR` para ele.
