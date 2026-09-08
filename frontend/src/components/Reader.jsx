@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api.js';
+import { getReadingState, markReadingStarted, saveReadingState } from '../services/libraryState.js';
 import PageControls from './PageControls.jsx';
 import PageViewer from './PageViewer.jsx';
 import ProgressBar from './ProgressBar.jsx';
@@ -13,6 +14,7 @@ export default function Reader({ comic, pages, documentUrl }) {
   const navigate = useNavigate();
   const shellRef = useRef(null);
   const viewerRef = useRef(null);
+  const skipInitialProgressWriteRef = useRef(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [zoom, setZoom] = useState(100);
   const [mode, setMode] = useState(() => localStorage.getItem('hq-reader:mode') || 'single');
@@ -23,13 +25,23 @@ export default function Reader({ comic, pages, documentUrl }) {
   const progressKey = `hq-reader:progress:${comic.id}`;
 
   useEffect(() => {
-    const saved = Number(localStorage.getItem(progressKey));
+    const reading = getReadingState(comic.id);
+    const saved = Number(reading?.lastPage || localStorage.getItem(progressKey));
     if (Number.isInteger(saved) && saved > 1 && saved <= pages.length) setResumePage(saved);
-  }, [pages.length, progressKey]);
+    markReadingStarted(comic.id, pages.length);
+  }, [comic.id, pages.length, progressKey]);
 
   useEffect(() => {
-    localStorage.setItem(progressKey, String(currentPage));
-  }, [currentPage, progressKey]);
+    if (skipInitialProgressWriteRef.current) {
+      skipInitialProgressWriteRef.current = false;
+      return;
+    }
+    saveReadingState(comic.id, {
+      lastPage: currentPage,
+      totalPages: pages.length,
+      completed: pages.length > 0 && currentPage >= pages.length
+    });
+  }, [comic.id, currentPage, pages.length]);
 
   useEffect(() => {
     localStorage.setItem('hq-reader:mode', mode);
@@ -120,7 +132,7 @@ export default function Reader({ comic, pages, documentUrl }) {
             <p className="mt-2 text-sm leading-6 text-zinc-400">Sua última página foi a {resumePage} de {pages.length}.</p>
             <div className="mt-6 grid gap-2">
               <button onClick={() => { setCurrentPage(resumePage); setResumePage(null); }} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:bg-red-500">Continuar leitura</button>
-              <button onClick={() => { setCurrentPage(1); setResumePage(null); }} className="rounded-xl bg-white/5 px-4 py-3 text-sm font-semibold text-zinc-300 hover:bg-white/10">Começar do início</button>
+              <button onClick={() => { saveReadingState(comic.id, { lastPage: 1, totalPages: pages.length, completed: pages.length === 1 }); setCurrentPage(1); setResumePage(null); }} className="rounded-xl bg-white/5 px-4 py-3 text-sm font-semibold text-zinc-300 hover:bg-white/10">Começar do início</button>
             </div>
           </div>
         </div>

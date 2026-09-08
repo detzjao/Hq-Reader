@@ -1,4 +1,4 @@
-import { BookOpen, Download, FileImage, FileText } from 'lucide-react';
+import { BookOpen, CheckCircle2, Download, FileImage, FileText, Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api.js';
 
@@ -14,13 +14,31 @@ function formatSize(bytes) {
   return `${value.toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
-export default function ComicCard({ comic }) {
+function readingLabel(readingState) {
+  if (!readingState?.started) return '';
+  if (readingState.completed) return 'Concluída';
+  if (readingState.lastPage > 1) return `Em leitura · pág. ${readingState.lastPage}`;
+  return 'Leitura iniciada';
+}
+
+export default function ComicCard({ comic, favorite = false, readingState = null, onToggleFavorite }) {
   const isPdf = comic.format === 'pdf';
   const Icon = isPdf ? FileText : FileImage;
   const readerUrl = `/reader/${encodeURIComponent(comic.id)}`;
+  const status = readingLabel(readingState);
 
   return (
-    <article className="group overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/70 shadow-xl shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-red-500/30 hover:bg-zinc-900 hover:shadow-glow">
+    <article className="group relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/70 shadow-xl shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-red-500/30 hover:bg-zinc-900 hover:shadow-glow">
+      <button
+        type="button"
+        onClick={() => onToggleFavorite?.(comic.id)}
+        className={`absolute right-3 top-3 z-20 grid h-10 w-10 place-items-center rounded-full border backdrop-blur-md transition ${favorite ? 'border-red-400/50 bg-red-500/90 text-white shadow-lg shadow-red-950/30' : 'border-white/15 bg-black/65 text-zinc-300 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-300'}`}
+        aria-label={favorite ? `Remover ${comic.name} dos favoritos` : `Favoritar ${comic.name}`}
+        title={favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+      >
+        <Heart className={`h-5 w-5 ${favorite ? 'fill-current' : ''}`} />
+      </button>
+
       <Link to={readerUrl} className="block" aria-label={`Ler ${comic.name}`}>
         <div className="relative aspect-[2/3] overflow-hidden bg-zinc-900">
           <div className="absolute inset-0 grid place-items-center text-zinc-700">
@@ -36,10 +54,16 @@ export default function ComicCard({ comic }) {
               onError={(event) => { event.currentTarget.style.display = 'none'; }}
             />
           )}
-          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-zinc-950 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-zinc-950 to-transparent" />
           <span className="absolute bottom-3 left-3 rounded-lg border border-white/10 bg-black/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-200 backdrop-blur">
             {comic.extension}
           </span>
+          {status && (
+            <span className={`absolute bottom-3 right-3 flex max-w-[68%] items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-bold backdrop-blur ${readingState?.completed ? 'border-emerald-400/25 bg-emerald-500/15 text-emerald-300' : 'border-amber-400/25 bg-amber-500/15 text-amber-200'}`}>
+              {readingState?.completed ? <CheckCircle2 className="h-3 w-3 shrink-0" /> : <BookOpen className="h-3 w-3 shrink-0" />}
+              <span className="truncate">{status}</span>
+            </span>
+          )}
         </div>
 
         <div className="px-4 pt-4">
@@ -53,7 +77,7 @@ export default function ComicCard({ comic }) {
 
       <div className="grid grid-cols-[1fr_auto] gap-2 p-4 pt-3">
         <Link to={readerUrl} className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2.5 text-sm font-bold text-white transition hover:bg-red-500">
-          <BookOpen className="h-4 w-4" /> Ler
+          <BookOpen className="h-4 w-4" /> {readingState?.started && !readingState?.completed ? 'Continuar' : 'Ler'}
         </Link>
         <a
           href={api.downloadUrl(comic.id)}
