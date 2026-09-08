@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updatedAt": "2026-09-08T10:25:00.000Z",
+  "updatedAt": "2026-09-08T12:30:00.000Z",
   "sourceFolderId": "1IShfGFxk8qG4JQ6TXk1vLHrXRp7KF7ci",
   "files": [
     {
@@ -9288,10 +9288,19 @@
       "enabled": true
     },
     {
-      "id": "1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6",
-      "label": "Marvel Comics Extra",
+      "id": "1wXs64lZ0nOBAAWwGutDHfjO-TnfYO6Ee",
+      "label": "Marvel Drive",
       "category": "Marvel",
-      "url": "https://drive.google.com/drive/folders/1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6",
+      "path": "Marvel/MARVEL DRIVE",
+      "url": "https://drive.google.com/drive/folders/1wXs64lZ0nOBAAWwGutDHfjO-TnfYO6Ee",
+      "enabled": true
+    },
+    {
+      "id": "1s4EOXNu4ryLbPJwiofmhQKNa8HmVMZpC",
+      "label": "Marvel Individual",
+      "category": "Marvel",
+      "path": "Marvel/MARVEL INDIVIDUAL",
+      "url": "https://drive.google.com/drive/folders/1s4EOXNu4ryLbPJwiofmhQKNa8HmVMZpC",
       "enabled": true
     }
   ]

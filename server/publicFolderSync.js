@@ -399,7 +399,9 @@ async function crawlSource(source) {
     { id: source.id, path: rootPath, resourceKey: source.resourceKey || '' },
     ...bootstrapFolders.map((folder) => ({
       id: folder.id,
-      path: `${rootPath}/${folder.group || 'Drive'}`.replace(/\/{2,}/g, '/'),
+      path: folder.group
+        ? `${rootPath}/${folder.group}`.replace(/\/{2,}/g, '/')
+        : rootPath,
       resourceKey: folder.resourceKey || ''
     }))
   ];

@@ -4,6 +4,40 @@ const ADMIN_STORAGE_KEY = 'hq-reader:admin-token';
 const DISCOVERED_STORAGE_KEY = 'hq-reader:drive-sync-files';
 const CUSTOM_SOURCES_STORAGE_KEY = 'hq-reader:custom-drive-sources';
 
+const MARVEL_EXTRA_PARENT_ID = '1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6';
+const MARVEL_DRIVE_SOURCE_ID = '1wXs64lZ0nOBAAWwGutDHfjO-TnfYO6Ee';
+const MARVEL_INDIVIDUAL_SOURCE_ID = '1s4EOXNu4ryLbPJwiofmhQKNa8HmVMZpC';
+
+function splitLegacyMarvelExtraSource(sourceById) {
+  const legacy = sourceById.get(MARVEL_EXTRA_PARENT_ID);
+  if (!legacy) return;
+
+  // Uma única execução para a pasta-pai era grande demais e dependia da
+  // listagem parcial do Google. Divide a coleção nas duas raízes reais para
+  // cada uma receber sua própria janela de sincronização.
+  sourceById.delete(MARVEL_EXTRA_PARENT_ID);
+  if (!sourceById.has(MARVEL_DRIVE_SOURCE_ID)) {
+    sourceById.set(MARVEL_DRIVE_SOURCE_ID, {
+      id: MARVEL_DRIVE_SOURCE_ID,
+      label: 'Marvel Drive',
+      category: legacy.category || 'Marvel',
+      path: 'Marvel/MARVEL DRIVE',
+      url: `https://drive.google.com/drive/folders/${MARVEL_DRIVE_SOURCE_ID}`,
+      enabled: true
+    });
+  }
+  if (!sourceById.has(MARVEL_INDIVIDUAL_SOURCE_ID)) {
+    sourceById.set(MARVEL_INDIVIDUAL_SOURCE_ID, {
+      id: MARVEL_INDIVIDUAL_SOURCE_ID,
+      label: 'Marvel Individual',
+      category: legacy.category || 'Marvel',
+      path: 'Marvel/MARVEL INDIVIDUAL',
+      url: `https://drive.google.com/drive/folders/${MARVEL_INDIVIDUAL_SOURCE_ID}`,
+      enabled: true
+    });
+  }
+}
+
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR' } = {}) {
     super(message);
@@ -146,6 +180,7 @@ async function syncLibrarySources({ onProgress } = {}) {
   const sourceById = new Map();
   for (const source of status.sources || []) if (source?.id) sourceById.set(source.id, source);
   for (const source of customSources) if (source?.id) sourceById.set(source.id, source);
+  splitLegacyMarvelExtraSource(sourceById);
   const sources = [...sourceById.values()];
 
   // Cada Drive recebe sua própria janela de execução. Isso evita que uma coleção

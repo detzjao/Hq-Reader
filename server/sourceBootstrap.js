@@ -1,4 +1,6 @@
 const MARVEL_EXTRA_SOURCE_ID = '1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6';
+const MARVEL_DRIVE_SOURCE_ID = '1wXs64lZ0nOBAAWwGutDHfjO-TnfYO6Ee';
+const MARVEL_INDIVIDUAL_SOURCE_ID = '1s4EOXNu4ryLbPJwiofmhQKNa8HmVMZpC';
 
 const MARVEL_DRIVE_FOLDERS = [
   '1ZPaKzIp7DV4s0OfNNkHu4PSpvyOqlORC',
@@ -228,16 +230,32 @@ const MARVEL_INDIVIDUAL_FOLDERS = [
 ];
 
 export function bootstrapFoldersForSource(sourceId) {
-  if (sourceId !== MARVEL_EXTRA_SOURCE_ID) return [];
-  return [
-    ...MARVEL_DRIVE_FOLDERS.map((id) => ({ id, group: 'MARVEL DRIVE' })),
-    ...MARVEL_INDIVIDUAL_FOLDERS.map((id) => ({ id, group: 'MARVEL INDIVIDUAL' }))
-  ];
+  const id = String(sourceId || '').trim();
+
+  // O Google Drive público pode entregar uma listagem parcial quando uma pasta
+  // possui muitos filhos. Estes dois diretórios são raízes grandes conhecidas e
+  // recebem um bootstrap completo das pastas de primeiro nível antes da busca
+  // recursiva normal continuar descendo por todas as subpastas.
+  if (id === MARVEL_DRIVE_SOURCE_ID) {
+    return MARVEL_DRIVE_FOLDERS.map((folderId) => ({ folderId, id: folderId, group: '' }));
+  }
+  if (id === MARVEL_INDIVIDUAL_SOURCE_ID) {
+    return MARVEL_INDIVIDUAL_FOLDERS.map((folderId) => ({ folderId, id: folderId, group: '' }));
+  }
+  if (id === MARVEL_EXTRA_SOURCE_ID) {
+    return [
+      ...MARVEL_DRIVE_FOLDERS.map((folderId) => ({ folderId, id: folderId, group: 'MARVEL DRIVE' })),
+      ...MARVEL_INDIVIDUAL_FOLDERS.map((folderId) => ({ folderId, id: folderId, group: 'MARVEL INDIVIDUAL' }))
+    ];
+  }
+  return [];
 }
 
 export function bootstrapStats() {
   return {
     sourceId: MARVEL_EXTRA_SOURCE_ID,
+    marvelDriveSourceId: MARVEL_DRIVE_SOURCE_ID,
+    marvelIndividualSourceId: MARVEL_INDIVIDUAL_SOURCE_ID,
     marvelDrive: MARVEL_DRIVE_FOLDERS.length,
     marvelIndividual: MARVEL_INDIVIDUAL_FOLDERS.length,
     total: MARVEL_DRIVE_FOLDERS.length + MARVEL_INDIVIDUAL_FOLDERS.length
