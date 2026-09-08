@@ -6,6 +6,7 @@ export default function ReaderToolbar({
   zoom,
   onZoomIn,
   onZoomOut,
+  onZoomReset,
   isFullscreen,
   onFullscreen,
   mode,
@@ -36,7 +37,7 @@ export default function ReaderToolbar({
         </button>
         <div className="hidden items-center rounded-lg border border-white/10 bg-zinc-900 sm:flex">
           <button onClick={onZoomOut} className="p-2 text-zinc-400 hover:text-white" aria-label="Diminuir zoom"><Minus className="h-4 w-4" /></button>
-          <span className="w-14 text-center text-xs font-semibold text-zinc-300">{zoom}%</span>
+          <button onClick={onZoomReset} className="w-14 text-center text-xs font-semibold text-zinc-300 hover:text-white" aria-label="Restaurar zoom para 100%" title="Restaurar zoom">{zoom}%</button>
           <button onClick={onZoomIn} className="p-2 text-zinc-400 hover:text-white" aria-label="Aumentar zoom"><Plus className="h-4 w-4" /></button>
         </div>
         <button onClick={onFullscreen} className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-white" aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}>

@@ -12,6 +12,7 @@ const clampZoom = (value) => Math.min(300, Math.max(50, value));
 export default function Reader({ comic, pages, documentUrl }) {
   const navigate = useNavigate();
   const shellRef = useRef(null);
+  const viewerRef = useRef(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [zoom, setZoom] = useState(100);
   const [mode, setMode] = useState(() => localStorage.getItem('hq-reader:mode') || 'single');
@@ -42,8 +43,18 @@ export default function Reader({ comic, pages, documentUrl }) {
 
   const previous = useCallback(() => setCurrentPage((page) => Math.max(1, page - 1)), []);
   const next = useCallback(() => setCurrentPage((page) => Math.min(pages.length, page + 1)), [pages.length]);
-  const zoomIn = useCallback(() => setZoom((value) => clampZoom(value + 10)), []);
-  const zoomOut = useCallback(() => setZoom((value) => clampZoom(value - 10)), []);
+  const zoomIn = useCallback(() => {
+    if (viewerRef.current?.zoomIn) viewerRef.current.zoomIn();
+    else setZoom((value) => clampZoom(value + 10));
+  }, []);
+  const zoomOut = useCallback(() => {
+    if (viewerRef.current?.zoomOut) viewerRef.current.zoomOut();
+    else setZoom((value) => clampZoom(value - 10));
+  }, []);
+  const resetZoom = useCallback(() => {
+    if (viewerRef.current?.resetZoom) viewerRef.current.resetZoom();
+    else setZoom(100);
+  }, []);
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -63,23 +74,12 @@ export default function Reader({ comic, pages, documentUrl }) {
         if (!document.fullscreenElement) navigate('/');
       } else if (event.key === '+' || event.key === '=') zoomIn();
       else if (event.key === '-') zoomOut();
+      else if (event.key === '0') resetZoom();
       else if (event.key.toLowerCase() === 'f') toggleFullscreen();
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigate, next, previous, toggleFullscreen, zoomIn, zoomOut]);
-
-  useEffect(() => {
-    const element = shellRef.current;
-    if (!element) return;
-    function onWheel(event) {
-      if (!event.ctrlKey) return;
-      event.preventDefault();
-      setZoom((value) => clampZoom(value + (event.deltaY < 0 ? 10 : -10)));
-    }
-    element.addEventListener('wheel', onWheel, { passive: false });
-    return () => element.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [navigate, next, previous, resetZoom, toggleFullscreen, zoomIn, zoomOut]);
 
   function handleCurrentPageChange(page, pinchZoom) {
     if (Number.isInteger(page)) setCurrentPage(Math.min(pages.length, Math.max(1, page)));
@@ -87,13 +87,14 @@ export default function Reader({ comic, pages, documentUrl }) {
   }
 
   return (
-    <div ref={shellRef} className="relative flex h-screen min-h-[480px] flex-col overflow-hidden bg-zinc-950 text-white">
+    <div ref={shellRef} className="relative flex h-screen min-h-[480px] flex-col overflow-hidden bg-zinc-950 text-white" style={{ height: '100dvh' }}>
       <ReaderToolbar
         title={comic.name.replace(/\.[^.]+$/, '')}
         downloadUrl={api.downloadUrl(comic.id)}
         zoom={zoom}
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
+        onZoomReset={resetZoom}
         isFullscreen={isFullscreen}
         onFullscreen={toggleFullscreen}
         mode={mode}
@@ -106,10 +107,10 @@ export default function Reader({ comic, pages, documentUrl }) {
 
       <div className="relative min-h-0 flex-1">
         <ThumbnailSidebar open={thumbnailsOpen} onClose={() => setThumbnailsOpen(false)} comic={comic} pages={pages} documentUrl={documentUrl} currentPage={currentPage} onSelect={(page) => { setCurrentPage(page); setMode('single'); setThumbnailsOpen(false); }} />
-        <PageViewer comic={comic} pages={pages} documentUrl={documentUrl} currentPage={currentPage} zoom={zoom} mode={mode} onNext={next} onPrevious={previous} onCurrentPageChange={handleCurrentPageChange} />
+        <PageViewer ref={viewerRef} comic={comic} pages={pages} documentUrl={documentUrl} currentPage={currentPage} zoom={zoom} mode={mode} onNext={next} onPrevious={previous} onCurrentPageChange={handleCurrentPageChange} />
       </div>
 
-      <PageControls current={currentPage} total={pages.length} onPrevious={previous} onNext={next} zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} mode={mode} />
+      <PageControls current={currentPage} total={pages.length} onPrevious={previous} onNext={next} zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onZoomReset={resetZoom} mode={mode} />
 
       {resumePage && (
         <div className="absolute inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">

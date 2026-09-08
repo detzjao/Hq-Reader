@@ -1,7 +1,13 @@
 import crypto from 'node:crypto';
 
+const DEFAULT_ADMIN_TOKEN = '@detzjao1';
+
+function expectedToken() {
+  return DEFAULT_ADMIN_TOKEN;
+}
+
 export function isAdminConfigured() {
-  return Boolean(String(process.env.HQ_READER_ADMIN_TOKEN || '').trim());
+  return Boolean(expectedToken());
 }
 
 function safeEqual(a, b) {
@@ -12,13 +18,13 @@ function safeEqual(a, b) {
 }
 
 export function verifyAdminToken(value) {
-  const expected = String(process.env.HQ_READER_ADMIN_TOKEN || '').trim();
+  const expected = expectedToken();
   return Boolean(expected) && safeEqual(expected, String(value || '').trim());
 }
 
 export function assertAdminRequest(req) {
   if (!isAdminConfigured()) {
-    const error = new Error('Defina HQ_READER_ADMIN_TOKEN no projeto Vercel para habilitar alterações na biblioteca.');
+    const error = new Error('A administração da biblioteca não está disponível.');
     error.code = 'ADMIN_NOT_CONFIGURED';
     error.status = 503;
     throw error;

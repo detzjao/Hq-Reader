@@ -156,3 +156,18 @@ O projeto aprova explicitamente o script de instalação do `esbuild@0.25.12` no
 - No Safari iOS, o leitor desativa streaming contínuo e prioriza requisições HTTP Range.
 - Timeout de abertura evita spinner infinito.
 - Canvas limita o DPR em iPhone/iPad para reduzir uso de memória em telas Retina.
+
+
+## Administração
+
+A interface exibe somente o acesso administrativo, sem os painéis técnicos de armazenamento. A senha administrativa fixa desta versão é `@detzjao1`.
+
+## Navegação e zoom livre (2.0.4)
+
+- Pinça com dois dedos amplia exatamente a região tocada, sem recentralizar a página.
+- Com zoom acima de 100%, arraste com um dedo no celular ou com o mouse no desktop para mover pela página.
+- Duplo toque/duplo clique alterna entre 100% e 200% usando o ponto tocado como foco.
+- `Ctrl/Cmd + roda do mouse/trackpad` aplica zoom no ponto do cursor.
+- Os botões `+` e `-` preservam o centro atual da leitura; tocar no percentual restaura 100%.
+- Ao trocar de página com zoom aplicado, a nova página abre no topo e centralizada horizontalmente.
+- No iPhone/iPad o leitor usa `100dvh` para se adaptar melhor às barras dinâmicas do Safari.

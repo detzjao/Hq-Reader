@@ -17,7 +17,10 @@ export function getAdminToken() {
 
 export function setAdminToken(value) {
   const clean = String(value || '').trim();
-  try { if (clean) localStorage.setItem(ADMIN_STORAGE_KEY, clean); else localStorage.removeItem(ADMIN_STORAGE_KEY); } catch {}
+  try {
+    if (clean) localStorage.setItem(ADMIN_STORAGE_KEY, clean);
+    else localStorage.removeItem(ADMIN_STORAGE_KEY);
+  } catch {}
   return clean;
 }
 

@@ -1,7 +1,6 @@
 import {
   ChevronDown,
   ChevronUp,
-  Database,
   FileUp,
   KeyRound,
   LibraryBig,
@@ -17,6 +16,7 @@ import { loadPdf } from '../services/pdf.js';
 const EXAMPLE_LINK = 'https://drive.google.com/file/d/ID_DO_ARQUIVO/view';
 const CATEGORY_SUGGESTIONS = ['Marvel', 'DC Comics', 'Turma da Mônica'];
 const ACCEPTED_FILES = '.pdf,.cbz,.cbr,.jpg,.jpeg,.png,.webp,.gif';
+const ADMIN_PASSWORD = '@detzjao1';
 
 function ext(name = '') { return name.split('.').pop()?.toLowerCase() || ''; }
 
@@ -47,7 +47,6 @@ export default function LibraryManager() {
   const [uploadPath, setUploadPath] = useState('');
   const [uploadFiles, setUploadFiles] = useState([]);
   const [comics, setComics] = useState([]);
-  const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -63,8 +62,7 @@ export default function LibraryManager() {
     setLoading(true);
     setError('');
     try {
-      const [library, comicsResponse] = await Promise.all([api.getLibraryStatus(), api.getComics(fresh)]);
-      setStatus(library);
+      const comicsResponse = await api.getComics(fresh);
       setComics(comicsResponse.files || []);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
@@ -78,11 +76,19 @@ export default function LibraryManager() {
   );
 
   function notifyUpdate() { window.dispatchEvent(new CustomEvent('hq-reader:library-updated')); }
-  function canWrite() { return Boolean(status?.writeEnabled && getAdminToken()); }
+  function canWrite() { return getAdminToken() === ADMIN_PASSWORD; }
 
   function savePassword() {
-    setAdminToken(adminToken);
-    setMessage(adminToken.trim() ? 'Senha salva neste navegador.' : 'Senha removida deste navegador.');
+    const value = adminToken.trim();
+    if (value !== ADMIN_PASSWORD) {
+      setAdminToken('');
+      setError('Senha administrativa incorreta.');
+      setMessage('');
+      return;
+    }
+    setAdminToken(value);
+    setAdminTokenState(value);
+    setMessage('Acesso administrativo liberado neste navegador.');
     setError('');
   }
 
@@ -164,28 +170,12 @@ export default function LibraryManager() {
 
       <section>
         <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><Database className="h-5 w-5" /></span>
-          <div>
-            <h3 className="text-lg font-bold text-white">Armazenamento</h3>
-            <p className="mt-0.5 text-sm text-zinc-500">Biblioteca e arquivos persistentes no Vercel.</p>
-          </div>
-        </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
-          <div className="rounded-xl border border-white/5 bg-black/20 px-3 py-3"><p className="text-[10px] uppercase tracking-wider text-zinc-600">Catálogo</p><p className="mt-1 text-sm font-bold text-white">{status?.total ?? '—'} HQs</p></div>
-          <div className="rounded-xl border border-white/5 bg-black/20 px-3 py-3"><p className="text-[10px] uppercase tracking-wider text-zinc-600">Vercel Blob</p><p className={`mt-1 text-sm font-bold ${status?.blobConfigured ? 'text-emerald-400' : 'text-amber-400'}`}>{status?.blobConfigured ? 'Conectado' : 'Não conectado'}</p></div>
-          <div className="rounded-xl border border-white/5 bg-black/20 px-3 py-3"><p className="text-[10px] uppercase tracking-wider text-zinc-600">Edição</p><p className={`mt-1 text-sm font-bold ${status?.writeEnabled ? 'text-emerald-400' : 'text-amber-400'}`}>{status?.writeEnabled ? 'Habilitada' : 'Bloqueada'}</p></div>
-        </div>
-        {!status?.blobConfigured && <p className="mt-3 text-xs leading-5 text-amber-300/80">Para importar arquivos e salvar alterações, conecte um Blob Store em Storage no projeto Vercel.</p>}
-      </section>
-
-      <section className="border-t border-white/5 pt-5">
-        <div className="flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><KeyRound className="h-5 w-5" /></span>
-          <div><h3 className="text-lg font-bold text-white">Administração</h3><p className="mt-0.5 text-sm text-zinc-500">A senha protege uploads e alterações na biblioteca.</p></div>
+          <div><h3 className="text-lg font-bold text-white">Acesso administrativo</h3><p className="mt-0.5 text-sm text-zinc-500">Informe a senha para adicionar, importar ou remover HQs.</p></div>
         </div>
         <div className="mt-4 flex gap-2">
-          <input type="password" value={adminToken} onChange={(e) => setAdminTokenState(e.target.value)} placeholder="Senha de administração" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" />
-          <button type="button" onClick={savePassword} className="rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-bold text-zinc-200 hover:bg-white/10">Salvar</button>
+          <input type="password" value={adminToken} onChange={(e) => setAdminTokenState(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') savePassword(); }} placeholder="Senha" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" />
+          <button type="button" onClick={savePassword} className="rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-bold text-zinc-200 hover:bg-white/10">Entrar</button>
         </div>
       </section>
 
