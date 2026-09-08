@@ -208,3 +208,9 @@ A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **
 - A sincronização automática roda **uma fonte por requisição**, dando a cada Drive sua própria janela de execução e salvando os resultados progressivamente no navegador.
 - A página inicial atualiza a contagem de HQs conforme cada fonte termina, em vez de esperar todas as pastas concluírem.
 - Se uma fonte falhar, a sincronização não é marcada como concluída e será tentada novamente na próxima abertura.
+
+## 2.1.2 — detecção de HQs sem extensão no Google Drive
+
+A varredura de pastas públicas não depende mais de o nome visível terminar em `.pdf`, `.cbz`, `.cbr` ou extensão de imagem. Quando o Drive mostra um arquivo sem extensão, o servidor inspeciona o MIME e os primeiros bytes do arquivo e normaliza o formato antes de adicioná-lo ao catálogo.
+
+Também foi ampliado o parser do `embeddedfolderview`: além do bloco visual `flip-entry-title`, ele percorre todos os links de arquivo e subpasta presentes no HTML, no mesmo princípio usado por crawlers públicos modernos do Google Drive. Isso melhora principalmente coleções profundas, como o Marvel Comics Extra.

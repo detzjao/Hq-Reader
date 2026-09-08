@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { del, list, put } from '@vercel/blob';
 import { isAdminConfigured } from './auth.js';
 import { driveThumbnailUrl, parseGoogleDriveLink, probePublicFile } from './googleDrive.js';
-import { extension, formatForName, isSupportedName, mimeForName } from './formats.js';
+import { ensureSupportedExtension, extension, extensionForMime, formatForFile, isSupportedName, mimeForName } from './formats.js';
 import { naturalSort } from './naturalSort.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -167,8 +167,8 @@ function normalizedCategory(file) {
 }
 
 export function publicComic(file) {
-  const ext = extension(file.name);
-  const format = formatForName(file.name);
+  const ext = extension(file.name) || extensionForMime(file.mimeType);
+  const format = formatForFile(file.name, file.mimeType);
   let thumbnailUrl = file.thumbnailUrl || '';
   if (!thumbnailUrl && file.sourceType === 'drive') thumbnailUrl = driveThumbnailUrl(file, 500);
   if (!thumbnailUrl && file.sourceType === 'blob' && format === 'image') thumbnailUrl = file.blobUrl || '';
@@ -263,11 +263,8 @@ export async function addDriveComic({ url, name = '', path: collectionPath = '' 
   const parsed = parseGoogleDriveLink(url);
   let probe = null;
   try { probe = await probePublicFile(parsed); } catch {}
-  let finalName = String(name || '').trim() || probe?.name || `HQ-${parsed.id.slice(-8)}.pdf`;
-  if (!extension(finalName) && probe?.mimeType) {
-    const byMime = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
-    if (byMime[probe.mimeType]) finalName += `.${byMime[probe.mimeType]}`;
-  }
+  let finalName = String(name || '').trim() || probe?.name || `HQ-${parsed.id.slice(-8)}`;
+  finalName = ensureSupportedExtension(finalName, probe?.mimeType, `HQ-${parsed.id.slice(-8)}`);
   if (!isSupportedName(finalName)) { const e = new Error('Formato não suportado. Use PDF, CBZ, CBR, JPG, PNG, WEBP ou GIF.'); e.code = 'UNSUPPORTED_FORMAT'; e.status = 415; throw e; }
   const clean = cleanPath(collectionPath);
   const existing = await getCatalog().then((catalog) => catalog.files.find((item) => item.id === parsed.id));

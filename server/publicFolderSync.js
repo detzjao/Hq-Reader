@@ -1,12 +1,7 @@
 import { publicComic, getCatalog, isBlobConfigured, saveCatalogSource, saveSyncSnapshot } from './catalog.js';
-import { mimeForName } from './formats.js';
+import { ensureSupportedExtension, extension, isSupportedName, mimeForName } from './formats.js';
+import { probePublicFile } from './googleDrive.js';
 import { bootstrapFoldersForSource } from './sourceBootstrap.js';
-
-const SUPPORTED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'cbz', 'cbr']);
-
-function extension(name = '') {
-  return String(name).split('.').pop()?.toLowerCase() || '';
-}
 
 function stripTags(value = '') {
   return value.replace(/<[^>]*>/g, ' ');
@@ -132,6 +127,67 @@ function folderViewCandidates(folderId, resourceKey = '') {
   ];
 }
 
+function absoluteDriveHref(value = '') {
+  const decoded = decodeHtml(value);
+  if (!decoded) return '';
+  try { return new URL(decoded, 'https://drive.google.com').toString(); } catch { return decoded; }
+}
+
+export function parseEmbeddedFolderEntries(html) {
+  const items = new Map();
+  const anchorPattern = /<a\b[^>]*\bhref\s*=\s*(["'])([\s\S]*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = anchorPattern.exec(String(html || '')))) {
+    const href = absoluteDriveHref(match[2]);
+    if (!href || !/(?:drive|docs)\.google\.com/i.test(href)) continue;
+    const title = decodeHtml(match[3]);
+    const folderId = folderIdFromUrl(href);
+    const fileId = fileIdFromUrl(href);
+    if (folderId) {
+      const key = `folder:${folderId}`;
+      const previous = items.get(key);
+      items.set(key, {
+        type: 'folder',
+        id: folderId,
+        title: title || previous?.title || `Pasta ${folderId.slice(-6)}`,
+        url: href,
+        resourceKey: resourceKeyFromUrl(href) || previous?.resourceKey || ''
+      });
+      continue;
+    }
+    if (fileId && /drive\.google\.com/i.test(href)) {
+      const key = `file:${fileId}`;
+      const previous = items.get(key);
+      items.set(key, {
+        type: 'file',
+        id: fileId,
+        title: title || previous?.title || `HQ-${fileId.slice(-8)}`,
+        url: href,
+        resourceKey: resourceKeyFromUrl(href) || previous?.resourceKey || ''
+      });
+    }
+  }
+  return [...items.values()];
+}
+
+function mergeFolderItems(...groups) {
+  const merged = new Map();
+  for (const group of groups) {
+    for (const item of group || []) {
+      if (!item?.id || !item?.type) continue;
+      const key = `${item.type}:${item.id}`;
+      const previous = merged.get(key);
+      merged.set(key, {
+        ...(previous || {}),
+        ...item,
+        title: item.title && !/^HQ-[A-Za-z0-9_-]+(?:\.pdf)?$/i.test(item.title) ? item.title : (previous?.title || item.title),
+        resourceKey: item.resourceKey || previous?.resourceKey || ''
+      });
+    }
+  }
+  return [...merged.values()];
+}
+
 function parseFlipEntries(html) {
   const items = [];
   const pattern = /<a\s+href=["'](https:\/\/drive\.google\.com\/[^"']+)["'][\s\S]*?<div\s+class=["']flip-entry-title["']>([\s\S]*?)<\/div>/gi;
@@ -194,10 +250,11 @@ async function fetchFolderItems(folderId, resourceKey = '') {
       if (!response.ok) { try { await response.body?.cancel(); } catch {} continue; }
       const html = await response.text();
       if (/ServiceLogin|accounts\.google\.com\/signin/i.test(html)) { sawLogin = true; continue; }
+      const anchors = parseEmbeddedFolderEntries(html);
       const flip = parseFlipEntries(html);
-      if (flip.length) return flip;
       const fallback = parseDrivePageFallback(html);
-      if (fallback.length) return fallback;
+      const items = mergeFolderItems(anchors, flip, fallback);
+      if (items.length) return items;
     } catch {
       // tenta a próxima visualização pública
     }
@@ -236,6 +293,99 @@ async function resolveShortcutTarget(item) {
   return null;
 }
 
+function publicFileProbeInput(item) {
+  return {
+    id: item.id,
+    resourceKey: item.resourceKey || resourceKeyFromUrl(item.url),
+    sourceUrl: item.url || ''
+  };
+}
+
+async function probeAndNormalizeFileItem(item) {
+  try {
+    const probe = await probePublicFile(publicFileProbeInput(item));
+    const title = ensureSupportedExtension(
+      probe.name || item.title || `HQ-${item.id.slice(-8)}`,
+      probe.mimeType,
+      `HQ-${item.id.slice(-8)}`
+    );
+    if (isSupportedName(title)) {
+      return {
+        type: 'file',
+        item: {
+          ...item,
+          id: probe.id || item.id,
+          title,
+          mimeType: probe.mimeType || mimeForName(title),
+          size: Number(probe.size || 0),
+          resourceKey: probe.resourceKey || item.resourceKey || '',
+          url: probe.sourceUrl || item.url || ''
+        }
+      };
+    }
+  } catch {
+    // Pode ser atalho ou item que o endpoint direto ainda não resolveu.
+  }
+
+  const target = await resolveShortcutTarget(item);
+  if (target?.type === 'folder') {
+    return {
+      type: 'folder',
+      item: {
+        id: target.id,
+        resourceKey: resourceKeyFromUrl(target.url),
+        title: item.title || `Pasta ${target.id.slice(-6)}`,
+        url: target.url
+      }
+    };
+  }
+
+  if (target?.type === 'file') {
+    const targetItem = {
+      ...item,
+      id: target.id,
+      url: target.url,
+      resourceKey: resourceKeyFromUrl(target.url) || item.resourceKey || ''
+    };
+    try {
+      const probe = await probePublicFile(publicFileProbeInput(targetItem));
+      const title = ensureSupportedExtension(
+        probe.name || targetItem.title || `HQ-${targetItem.id.slice(-8)}`,
+        probe.mimeType,
+        `HQ-${targetItem.id.slice(-8)}`
+      );
+      if (isSupportedName(title)) {
+        return {
+          type: 'file',
+          item: {
+            ...targetItem,
+            title,
+            mimeType: probe.mimeType || mimeForName(title),
+            size: Number(probe.size || 0),
+            resourceKey: probe.resourceKey || targetItem.resourceKey || ''
+          }
+        };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+export async function resolvePublicFileCandidate(item) {
+  if (!item?.id) return null;
+  if (isSupportedName(item.title)) {
+    return {
+      type: 'file',
+      item: {
+        ...item,
+        mimeType: item.mimeType || mimeForName(item.title),
+        size: Number(item.size || 0)
+      }
+    };
+  }
+  return probeAndNormalizeFileItem(item);
+}
+
 async function crawlSource(source) {
   const maxFolders = Number(process.env.PUBLIC_FOLDER_MAX_FOLDERS || 3500);
   const maxFiles = Number(process.env.PUBLIC_FOLDER_MAX_FILES || 30_000);
@@ -272,6 +422,7 @@ async function crawlSource(source) {
       for (const result of results) {
         if (result.status === 'rejected') { failedFolders += 1; continue; }
         const { folder, items } = result.value;
+        const fileCandidates = [];
         for (const item of items) {
           if (item.type === 'folder') {
             if (!visitedFolders.has(item.id)) nextFrontier.push({
@@ -279,41 +430,56 @@ async function crawlSource(source) {
               resourceKey: item.resourceKey || '',
               path: `${folder.path}/${item.title}`.replace(/\/{2,}/g, '/')
             });
-            continue;
+          } else if (item.type === 'file') {
+            fileCandidates.push(item);
           }
+        }
 
-          let fileItem = item;
-          let ext = extension(fileItem.title);
-          if (!SUPPORTED_EXTENSIONS.has(ext)) {
-            const target = await resolveShortcutTarget(item);
-            if (target?.type === 'folder' && !visitedFolders.has(target.id)) {
-              nextFrontier.push({ id: target.id, resourceKey: resourceKeyFromUrl(target.url), path: `${folder.path}/${item.title}`.replace(/\/{2,}/g, '/') });
+        // Arquivos com extensão conhecida entram imediatamente. Itens sem extensão
+        // são inspecionados em paralelo pelo MIME/assinatura do arquivo. Isso é
+        // essencial para Drives que armazenam PDFs com nomes sem ".pdf".
+        const probeConcurrency = Math.max(2, Math.min(8, Number(process.env.PUBLIC_FILE_PROBE_CONCURRENCY || 6)));
+        for (let fileOffset = 0; fileOffset < fileCandidates.length; fileOffset += probeConcurrency) {
+          const fileBatch = fileCandidates.slice(fileOffset, fileOffset + probeConcurrency);
+          const resolvedBatch = await Promise.allSettled(fileBatch.map(resolvePublicFileCandidate));
+          for (let fileIndex = 0; fileIndex < resolvedBatch.length; fileIndex += 1) {
+            const resolved = resolvedBatch[fileIndex];
+            if (resolved.status !== 'fulfilled' || !resolved.value) continue;
+
+            if (resolved.value.type === 'folder') {
+              const targetFolder = resolved.value.item;
+              if (targetFolder?.id && !visitedFolders.has(targetFolder.id)) {
+                nextFrontier.push({
+                  id: targetFolder.id,
+                  resourceKey: targetFolder.resourceKey || '',
+                  path: `${folder.path}/${targetFolder.title || fileBatch[fileIndex]?.title || 'Atalho'}`.replace(/\/{2,}/g, '/')
+                });
+              }
               continue;
             }
-            if (target?.type === 'file') fileItem = { ...item, id: target.id, url: target.url };
-            ext = extension(fileItem.title);
-          }
-          if (!SUPPORTED_EXTENSIONS.has(ext)) continue;
 
-          files.set(fileItem.id, {
-            id: fileItem.id,
-            name: fileItem.title,
-            mimeType: mimeForName(fileItem.title),
-            size: 0,
-            path: folder.path,
-            category: source.category,
-            sourceType: 'drive',
-            sourceFolderId: source.id,
-            sourceUrl: fileItem.url,
-            resourceKey: fileItem.resourceKey || resourceKeyFromUrl(fileItem.url),
-            addedAt: new Date().toISOString(),
-            syncedAt: new Date().toISOString()
-          });
-          if (files.size > maxFiles) {
-            const error = new Error(`A fonte “${source.label}” excedeu o limite de arquivos da varredura.`);
-            error.code = 'PUBLIC_FOLDER_LIMIT';
-            error.status = 413;
-            throw error;
+            const fileItem = resolved.value.item;
+            if (!fileItem?.id || !isSupportedName(fileItem.title)) continue;
+            files.set(fileItem.id, {
+              id: fileItem.id,
+              name: fileItem.title,
+              mimeType: fileItem.mimeType || mimeForName(fileItem.title),
+              size: Number(fileItem.size || 0),
+              path: folder.path,
+              category: source.category,
+              sourceType: 'drive',
+              sourceFolderId: source.id,
+              sourceUrl: fileItem.url,
+              resourceKey: fileItem.resourceKey || resourceKeyFromUrl(fileItem.url),
+              addedAt: new Date().toISOString(),
+              syncedAt: new Date().toISOString()
+            });
+            if (files.size > maxFiles) {
+              const error = new Error(`A fonte “${source.label}” excedeu o limite de arquivos da varredura.`);
+              error.code = 'PUBLIC_FOLDER_LIMIT';
+              error.status = 413;
+              throw error;
+            }
           }
         }
       }

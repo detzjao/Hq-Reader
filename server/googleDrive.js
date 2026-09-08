@@ -73,19 +73,36 @@ function totalSize(headers) {
   return Number(total || headers.get('content-length') || 0);
 }
 
+function sniffMime(bytes, headerMime = '') {
+  const header = String(headerMime || '').toLowerCase().split(';')[0].trim();
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const ascii = String.fromCharCode(...data.slice(0, 16));
+  const hex = [...data.slice(0, 12)].map((value) => value.toString(16).padStart(2, '0')).join('');
+
+  if (ascii.startsWith('%PDF-')) return 'application/pdf';
+  if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+  if (hex.startsWith('89504e470d0a1a0a')) return 'image/png';
+  if (ascii.startsWith('GIF87a') || ascii.startsWith('GIF89a')) return 'image/gif';
+  if (ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WEBP') return 'image/webp';
+  if (hex.startsWith('504b0304') || hex.startsWith('504b0506') || hex.startsWith('504b0708')) return 'application/zip';
+  if (hex.startsWith('526172211a0700') || hex.startsWith('526172211a070100')) return 'application/vnd.rar';
+  return header || 'application/octet-stream';
+}
+
 export async function probePublicFile(input) {
   const parsed = typeof input === 'string' ? parseGoogleDriveLink(input) : input;
-  const response = await fetchPublicFile(parsed.id, { resourceKey: parsed.resourceKey, range: 'bytes=0-0', timeout: 20_000 });
-  const result = {
+  const response = await fetchPublicFile(parsed.id, { resourceKey: parsed.resourceKey, range: 'bytes=0-31', timeout: 20_000 });
+  let bytes = new Uint8Array();
+  try { bytes = new Uint8Array(await response.arrayBuffer()); } catch {}
+  const headerMime = (response.headers.get('content-type') || 'application/octet-stream').split(';')[0];
+  return {
     id: parsed.id,
     name: filenameFromDisposition(response.headers.get('content-disposition') || ''),
-    mimeType: (response.headers.get('content-type') || 'application/octet-stream').split(';')[0],
+    mimeType: sniffMime(bytes, headerMime),
     size: totalSize(response.headers),
     sourceUrl: parsed.sourceUrl || '',
     resourceKey: parsed.resourceKey || ''
   };
-  await cancel(response);
-  return result;
 }
 
 export function driveThumbnailUrl(file, width = 500) {
