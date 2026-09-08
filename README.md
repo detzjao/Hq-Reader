@@ -188,5 +188,5 @@ O botão **Atualizar base de dados** varre estas fontes públicas do Google Driv
 - DC Comics
 - Turma da Mônica
 
-A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **MARVEL DRIVE**.
+
 
