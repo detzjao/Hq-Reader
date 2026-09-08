@@ -26,13 +26,16 @@ export default function ComicCard({ comic }) {
           <div className="absolute inset-0 grid place-items-center text-zinc-700">
             <Icon className="h-14 w-14" strokeWidth={1.2} />
           </div>
-          <img
-            src={api.assetUrl(comic.thumbnailUrl)}
-            alt={`Capa de ${comic.name}`}
-            loading="lazy"
-            className="relative h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-            onError={(event) => { event.currentTarget.style.display = 'none'; }}
-          />
+          {comic.thumbnailUrl && (
+            <img
+              src={api.assetUrl(comic.thumbnailUrl)}
+              alt={`Capa de ${comic.name}`}
+              loading="lazy"
+              decoding="async"
+              className="relative h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+              onError={(event) => { event.currentTarget.style.display = 'none'; }}
+            />
+          )}
           <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-zinc-950 to-transparent" />
           <span className="absolute bottom-3 left-3 rounded-lg border border-white/10 bg-black/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-200 backdrop-blur">
             {comic.extension}

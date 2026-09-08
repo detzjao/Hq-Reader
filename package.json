@@ -1,15 +1,18 @@
 {
-  "name": "hq-reader",
-  "version": "1.0.0",
+  "name": "hq-reader-vercel",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
+  "workspaces": ["frontend"],
+  "engines": { "node": ">=20" },
   "scripts": {
-    "install:all": "npm install --prefix backend && npm install --prefix frontend",
-    "dev": "concurrently -n BACKEND,FRONTEND -c auto \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
-    "build": "npm run build --prefix frontend",
-    "start": "npm run start --prefix backend"
+    "build": "npm run build --workspace hq-reader-frontend",
+    "dev": "npx vercel dev",
+    "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/archiveCache.js && node --check api/comics.js && node --check api/content.js && node --check api/blob-upload.js"
   },
-  "devDependencies": {
-    "concurrently": "^9.1.2"
+  "dependencies": {
+    "@vercel/blob": "^2.8.0",
+    "adm-zip": "^0.5.16",
+    "node-unrar-js": "^2.0.2"
   }
 }

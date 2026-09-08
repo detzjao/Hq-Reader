@@ -1,202 +1,145 @@
-# HQ Reader
+# HQ Reader — Vercel All-in-One
 
-Leitor web de HQs com biblioteca organizada por **Marvel**, **DC Comics** e **Turma da Mônica**.
+Versão do HQ Reader preparada para rodar inteira no **Vercel**, sem Render e sem backend separado.
 
-## Recursos
+## Arquitetura
 
-- Biblioteca com busca e filtros por categoria.
-- Leitura de PDF com PDF.js.
-- Leitura de CBZ e CBR página a página.
-- Imagens JPG, JPEG, PNG, WEBP e GIF.
-- Zoom, tela cheia, miniaturas, modo página única e rolagem vertical.
-- Progresso de leitura salvo no navegador.
-- Importação de HQ por link público do Google Drive.
-- Importação direta de arquivos do computador.
-- Importação múltipla de arquivos.
-- Download das HQs pelo card da biblioteca e pela barra do leitor.
-- Atualização das pastas públicas configuradas no catálogo.
-- Catálogo local em `backend/data/library.json`.
+- Frontend: React + Vite + Tailwind
+- API: Vercel Functions em `/api`
+- Catálogo inicial: `data/initial-library.json`
+- Uploads persistentes: Vercel Blob
+- Metadados adicionados/removidos: Vercel Blob
+- PDF: renderizado no navegador com PDF.js
+- CBZ/CBR: extraído sob demanda e as páginas ficam em cache no Vercel Blob
+- Google Drive: arquivos públicos continuam sendo a origem das HQs já catalogadas
 
-## Fontes configuradas
+O catálogo inicial contém **698 HQs**:
 
-O projeto já vem configurado com três fontes:
+- Marvel: 512
+- DC Comics: 87
+- Turma da Mônica: 99
 
-- **Marvel** — `1IShfGFxk8qG4JQ6TXk1vLHrXRp7KF7ci`
-- **DC Comics** — `1-9bSxiCfavMPf9g0wzSDFVkzJqS6j2nI`
-- **Turma da Mônica** — `1LtX8qYpKFYp5pfMK4FWiO6EZPpLey49D`
+## Publicar no Vercel
 
-Ao iniciar, o backend tenta atualizar essas bibliotecas. Também existe o botão **Atualizar** em `Configurações → Biblioteca`.
+### 1. Suba este projeto
 
-## Importar uma HQ do computador
+Importe o repositório/pasta no Vercel normalmente. Não configure Render e não defina `VITE_API_BASE_URL`.
 
-Abra:
-
-`Adicionar HQs → Biblioteca → Importar arquivo`
-
-Selecione um ou vários arquivos e, se quiser, informe um caminho de categoria/coleção, por exemplo:
+A aplicação usa apenas rotas do mesmo domínio:
 
 ```text
-Marvel/Homem-Aranha
-DC Comics/Batman
-Turma da Mônica/Cebolinha
+/api/comics
+/api/comic
+/api/content
+/api/download
+/api/library
+/api/blob-upload
 ```
 
-Os arquivos enviados são armazenados em `backend/data/uploads/` e adicionados ao catálogo.
+### 2. Conecte Vercel Blob
 
-Formatos aceitos:
+No projeto Vercel:
+
+1. Abra **Storage**.
+2. Crie/conecte um **Blob Store**.
+3. Use acesso **Public** para os arquivos da biblioteca.
+4. O Vercel adicionará `BLOB_READ_WRITE_TOKEN` ao projeto automaticamente.
+
+O catálogo inicial carrega mesmo sem Blob. O Blob é necessário para:
+
+- upload de PDF/CBZ/CBR/imagens;
+- adicionar links de forma persistente;
+- excluir HQs do catálogo;
+- cachear páginas extraídas de CBZ/CBR.
+
+### 3. Crie a senha de administração
+
+Em **Settings → Environment Variables**, adicione:
 
 ```text
-.pdf .cbz .cbr .jpg .jpeg .png .webp .gif
+HQ_READER_ADMIN_TOKEN=uma-senha-forte-escolhida-por-voce
 ```
 
-## Adicionar por link
+Depois faça um **Redeploy**.
 
-Também é possível cadastrar um arquivo público do Drive diretamente pela interface.
+Na aplicação, abra:
 
-Exemplo de coleção:
+**Configurações → Biblioteca → Administração**
 
-```text
-DC Comics/Batman
-```
+Digite a mesma senha. Ela fica salva somente naquele navegador e é enviada apenas para as rotas de escrita da própria aplicação.
 
-Exemplo de importação em lote:
+## Otimizações desta versão
 
-```text
-DC Comics/Batman/Batman 001.pdf | https://drive.google.com/file/d/ID/view
-Marvel/X-Men/X-Men 001.cbz | https://drive.google.com/file/d/ID/view
-```
+### Biblioteca
 
-## Download
+A tela não renderiza mais centenas de cards de uma só vez. Ela começa com 36 HQs e adiciona novos lotes conforme a rolagem se aproxima do final.
 
-Cada HQ possui um botão de download na biblioteca. O leitor também possui um botão de download na barra superior.
+As capas dos arquivos do Google Drive usam thumbnails diretamente do Drive, evitando baixar o PDF inteiro só para mostrar a capa.
 
-O download passa pelo backend, portanto funciona tanto para arquivos cadastrados por link quanto para arquivos importados diretamente para o HQ Reader.
+### PDF
 
-## Executar
+O servidor não converte cada página em imagem. O PDF.js renderiza diretamente no navegador e solicita apenas os trechos necessários do arquivo.
 
-Na raiz do projeto:
+### Uploads grandes
+
+Os arquivos não passam pelo corpo de uma Vercel Function. O navegador envia diretamente para Vercel Blob através do fluxo de Client Upload, inclusive com multipart para arquivos maiores.
+
+### Download
+
+- HQ no Vercel Blob: redireciona para o arquivo no Blob/CDN.
+- HQ do Google Drive: redireciona para a origem pública do Drive.
+
+Assim a Function não precisa transportar o arquivo inteiro para o download.
+
+### CBZ e CBR
+
+Na primeira abertura, o arquivo é processado e as páginas são armazenadas no Blob. Nas próximas leituras, as páginas vêm diretamente do CDN.
+
+## Desenvolvimento local
+
+Instale:
 
 ```bash
 npm install
-npm run install:all
+```
+
+Se já tiver conectado Blob ao projeto Vercel:
+
+```bash
+npx vercel env pull .env.local
+```
+
+Depois:
+
+```bash
 npm run dev
 ```
 
-Frontend:
+O comando usa `vercel dev`, permitindo testar o frontend e as Functions no mesmo endereço.
+
+## Variáveis opcionais
 
 ```text
-http://localhost:5173
+MAX_UPLOAD_BYTES=524288000
+MAX_ARCHIVE_BYTES=314572800
+MAX_ARCHIVE_PAGES=1200
+CATALOG_CACHE_MS=20000
 ```
 
-Backend:
+## Estrutura principal
 
 ```text
-http://localhost:3001
+hq-reader/
+├── api/                    # Vercel Functions
+├── data/
+│   └── initial-library.json
+├── server/                 # serviços compartilhados pelas Functions
+├── frontend/               # React + Vite
+├── vercel.json
+├── package.json
+└── README.md
 ```
 
-## Produção
+## Observação sobre o Google Drive
 
-Para build do frontend:
-
-```bash
-npm run build
-```
-
-Se frontend e backend estiverem em domínios diferentes, configure `VITE_API_BASE_URL` no frontend e `FRONTEND_ORIGIN` no backend.
-
-## Persistência
-
-O catálogo é salvo em:
-
-```text
-backend/data/library.json
-```
-
-HQs importadas do computador ficam em:
-
-```text
-backend/data/uploads/
-```
-
-Em hospedagens com disco efêmero, configure armazenamento persistente para esses dois caminhos.
-
-## Correções desta versão
-
-- Corrigida a gravação concorrente do catálogo que podia causar `Erro HTTP 500` ao importar vários links enquanto a biblioteca sincronizava.
-- Importações, uploads e sincronizações agora atualizam `library.json` de forma serializada e atômica.
-- O catálogo inicial inclui HQs nas categorias Marvel, DC Comics e Turma da Mônica, evitando uma biblioteca vazia quando o Google bloqueia temporariamente a varredura pública.
-- A atualização das fontes tolera falhas isoladas de subpastas e mostra o erro específico de cada fonte na interface.
-
-## Publicação: Vercel + Render
-
-O projeto usa dois serviços em produção:
-
-- **Vercel**: frontend React/Vite.
-- **Render**: backend Express e catálogo da biblioteca.
-
-### 1. Render
-
-Crie um **Web Service** apontando para este repositório/projeto.
-
-Se usar o arquivo `render.yaml`, o serviço já recebe os comandos corretos. Se configurar manualmente:
-
-```text
-Build Command: npm install --prefix backend
-Start Command: npm run start --prefix backend
-Health Check: /api/health
-```
-
-Variáveis recomendadas no Render:
-
-```text
-FRONTEND_ORIGIN=https://hq-reader-seven.vercel.app
-ALLOW_VERCEL_PREVIEWS=true
-SYNC_PUBLIC_FOLDERS_ON_START=false
-LIBRARY_WRITE_ENABLED=true
-```
-
-Depois de publicar, abra no navegador:
-
-```text
-https://SEU-SERVICO.onrender.com/api/health
-```
-
-A resposta deve conter `"ok": true`.
-
-### 2. Vercel
-
-A causa mais comum de a biblioteca funcionar localmente e ficar vazia no Vercel é deixar `VITE_API_BASE_URL` vazio. O proxy de `/api` existente em `vite.config.js` funciona **somente no desenvolvimento local**.
-
-No projeto do Vercel, abra **Settings → Environment Variables** e crie:
-
-```text
-VITE_API_BASE_URL=https://hq-reader-api.onrender.com
-```
-
-Sem barra `/` no final. Depois faça um **Redeploy**, porque variáveis `VITE_*` são incorporadas durante o build.
-
-Este projeto também permite configurar a URL do Render em tempo de execução em:
-
-```text
-Configurações → Biblioteca → Servidor da biblioteca
-```
-
-Assim é possível trocar o backend sem alterar o código. A configuração fica salva no navegador e tem prioridade sobre `VITE_API_BASE_URL`.
-
-### 3. Teste de produção
-
-Confirme nesta ordem:
-
-```text
-https://SEU-SERVICO.onrender.com/api/health
-https://SEU-SERVICO.onrender.com/api/comics
-https://hq-reader-seven.vercel.app/
-```
-
-O endpoint `/api/comics` deve retornar o catálogo em JSON. O catálogo incluído nesta versão possui 698 HQs: 512 Marvel, 87 DC Comics e 99 Turma da Mônica.
-
-### Persistência no Render
-
-O catálogo que acompanha o deploy funciona normalmente sem disco persistente. Entretanto, alterações feitas depois do deploy — uploads, remoções e HQs adicionadas pela interface — podem ser perdidas quando um serviço Render com filesystem efêmero reinicia ou recebe novo deploy.
-
-Para persistir uploads e edições de catálogo entre reinicializações, use um Persistent Disk/armazenamento persistente e aponte `LIBRARY_CATALOG_FILE` e `LIBRARY_UPLOAD_DIR` para ele.
+As HQs já catalogadas continuam usando seus arquivos públicos do Drive como origem. Nenhuma API Key do Google é necessária. Novos arquivos podem ser adicionados por link individual ou enviados diretamente para o Vercel Blob.

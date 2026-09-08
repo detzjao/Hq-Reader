@@ -1,40 +1,6 @@
-const ENV_API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-const STORAGE_KEY = 'hq-reader:api-base-url';
+import { upload } from '@vercel/blob/client';
 
-function normalizeBase(value = '') {
-  return String(value || '').trim().replace(/\/$/, '');
-}
-
-export function getStoredApiBaseUrl() {
-  try {
-    return normalizeBase(localStorage.getItem(STORAGE_KEY) || '');
-  } catch {
-    return '';
-  }
-}
-
-export function getApiBaseUrl() {
-  return getStoredApiBaseUrl() || ENV_API_BASE || '';
-}
-
-export function getConfiguredApiBaseUrl() {
-  return getStoredApiBaseUrl() || ENV_API_BASE || '';
-}
-
-export function setApiBaseUrl(value) {
-  const normalized = normalizeBase(value);
-  try {
-    if (normalized) localStorage.setItem(STORAGE_KEY, normalized);
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Ignora indisponibilidade do localStorage.
-  }
-  return normalized;
-}
-
-export function getBuildApiBaseUrl() {
-  return ENV_API_BASE;
-}
+const ADMIN_STORAGE_KEY = 'hq-reader:admin-token';
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR' } = {}) {
@@ -45,104 +11,83 @@ export class ApiError extends Error {
   }
 }
 
-async function parseErrorResponse(response) {
-  let body = {};
-  try { body = await response.json(); } catch { body = {}; }
-
-  if (!body?.error && response.status === 404 && !getApiBaseUrl() && typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-    return new ApiError('O backend da biblioteca não está configurado para esta publicação.', {
-      status: 404,
-      code: 'API_NOT_CONFIGURED'
-    });
-  }
-
-  return new ApiError(body.error || `Erro HTTP ${response.status}.`, {
-    status: response.status,
-    code: body.code || 'HTTP_ERROR'
-  });
+export function getAdminToken() {
+  try { return localStorage.getItem(ADMIN_STORAGE_KEY) || ''; } catch { return ''; }
 }
 
-async function request(path, options = {}) {
+export function setAdminToken(value) {
+  const clean = String(value || '').trim();
+  try { if (clean) localStorage.setItem(ADMIN_STORAGE_KEY, clean); else localStorage.removeItem(ADMIN_STORAGE_KEY); } catch {}
+  return clean;
+}
+
+async function parseError(response) {
+  let body = {};
+  try { body = await response.json(); } catch {}
+  return new ApiError(body.error || `Erro HTTP ${response.status}.`, { status: response.status, code: body.code || 'HTTP_ERROR' });
+}
+
+async function request(path, { admin = false, timeout = 30_000, ...options } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeout ?? 20_000);
-  const API_BASE = getApiBaseUrl();
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(path, {
       ...options,
       signal: options.signal || controller.signal,
       headers: {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(admin && getAdminToken() ? { 'X-Admin-Token': getAdminToken() } : {}),
         ...(options.headers || {})
       }
     });
-    if (!response.ok) throw await parseErrorResponse(response);
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-      throw new ApiError('A resposta recebida não veio do backend do HQ Reader. Configure o endereço do servidor.', {
-        status: response.status,
-        code: 'INVALID_API_RESPONSE'
-      });
-    }
+    if (!response.ok) throw await parseError(response);
     return response.json();
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    if (error.name === 'AbortError') throw new ApiError('A solicitação demorou demais. Tente novamente.', { code: 'TIMEOUT' });
-    throw new ApiError('Não foi possível conectar ao servidor do HQ Reader.', { code: 'NETWORK_ERROR' });
-  } finally {
-    clearTimeout(timeout);
+    if (error?.name === 'AbortError') throw new ApiError('A solicitação demorou demais. Tente novamente.', { code: 'TIMEOUT' });
+    throw new ApiError('Não foi possível concluir a solicitação.', { code: 'NETWORK_ERROR' });
+  } finally { clearTimeout(timer); }
+}
+
+export async function uploadBlobFile(file, { onProgress } = {}) {
+  const adminToken = getAdminToken();
+  if (!adminToken) throw new ApiError('Informe a senha de administração antes de enviar arquivos.', { code: 'ADMIN_TOKEN_REQUIRED', status: 401 });
+  try {
+    return await upload(`hq-reader/uploads/${Date.now()}-${file.name}`, file, {
+      access: 'public',
+      handleUploadUrl: '/api/blob-upload',
+      multipart: file.size > 20 * 1024 * 1024,
+      clientPayload: JSON.stringify({ adminToken }),
+      onUploadProgress: onProgress
+    });
+  } catch (error) {
+    throw new ApiError(error?.message || 'Não foi possível enviar o arquivo.', { code: 'UPLOAD_FAILED' });
   }
 }
 
-async function uploadComic(file, collectionPath = '') {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30 * 60_000);
-  const API_BASE = getApiBaseUrl();
+export async function uploadThumbnailBlob(blob, filename) {
+  const adminToken = getAdminToken();
+  if (!adminToken) return null;
   try {
-    const response = await fetch(`${API_BASE}/api/library/upload`, {
-      method: 'POST',
-      body: file,
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': file.type || 'application/octet-stream',
-        'X-File-Name': encodeURIComponent(file.name),
-        'X-Collection-Path': encodeURIComponent(collectionPath || '')
-      }
+    return await upload(`hq-reader/covers/${Date.now()}-${filename}`, blob, {
+      access: 'public',
+      handleUploadUrl: '/api/blob-upload',
+      clientPayload: JSON.stringify({ adminToken })
     });
-    if (!response.ok) throw await parseErrorResponse(response);
-    return response.json();
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    if (error.name === 'AbortError') throw new ApiError('O envio demorou demais e foi interrompido.', { code: 'UPLOAD_TIMEOUT' });
-    throw new ApiError('Não foi possível enviar a HQ para o servidor.', { code: 'UPLOAD_FAILED' });
-  } finally {
-    clearTimeout(timeout);
-  }
+  } catch { return null; }
 }
 
 export const api = {
   health: () => request('/api/health'),
-  getComics: () => request('/api/comics'),
-  getComic: (id) => request(`/api/comics/${encodeURIComponent(id)}`),
-  getComicPages: (id) => request(`/api/comics/${encodeURIComponent(id)}/pages`, { timeout: 60_000 }),
+  getComics: (fresh = false) => request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`),
+  getComic: (id) => request(`/api/comic?id=${encodeURIComponent(id)}`),
+  getArchivePages: (id) => request(`/api/archive?id=${encodeURIComponent(id)}`, { timeout: 60_000 }),
   getLibraryStatus: () => request('/api/library'),
-  syncLibrarySources: (force = false) => request('/api/library/sync', {
-    method: 'POST',
-    body: JSON.stringify({ force }),
-    timeout: 15 * 60_000
-  }),
-  addToLibrary: ({ url, name, path }) => request('/api/library', {
-    method: 'POST',
-    body: JSON.stringify({ url, name, path })
-  }),
-  uploadToLibrary: (file, path) => uploadComic(file, path),
-  importLibrary: (text) => request('/api/library/import', {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-    timeout: 120_000
-  }),
-  removeFromLibrary: (id) => request(`/api/library/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  assetUrl: (path) => `${getApiBaseUrl()}${path}`,
-  downloadUrl: (id) => `${getApiBaseUrl()}/api/comics/${encodeURIComponent(id)}/download`
+  addToLibrary: ({ url, name, path }) => request('/api/library-add', { method: 'POST', admin: true, body: JSON.stringify({ url, name, path }) }),
+  importLibrary: (text) => request('/api/library-import', { method: 'POST', admin: true, body: JSON.stringify({ text }), timeout: 60_000 }),
+  registerUpload: ({ blob, originalName, size, path, thumbnailUrl }) => request('/api/library-upload-meta', { method: 'POST', admin: true, body: JSON.stringify({ blob, originalName, size, path, thumbnailUrl }) }),
+  removeFromLibrary: (id) => request(`/api/library-delete?id=${encodeURIComponent(id)}`, { method: 'DELETE', admin: true }),
+  assetUrl: (value = '') => /^https?:\/\//i.test(value) ? value : value,
+  downloadUrl: (id) => `/api/download?id=${encodeURIComponent(id)}`
 };
