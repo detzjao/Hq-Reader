@@ -13,7 +13,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-      const result = await syncConfiguredSources({ extraSources: body.sources || [] });
+      const result = await syncConfiguredSources({ extraSources: body.sources || [], sourceIds: body.sourceIds || [] });
       res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json(result);
     }

@@ -1,6 +1,6 @@
 {
   "name": "hq-reader-vercel",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm run build --workspace hq-reader-frontend",
     "dev": "npm run dev --workspace hq-reader-frontend",
-    "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/publicFolderSync.js && node --check server/archiveCache.js && node --check api/index.js",
+    "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/sourceBootstrap.js && node --check server/publicFolderSync.js && node --check server/archiveCache.js && node --check server/handlers/library.js && node --check api/index.js",
     "start": "npm run dev --workspace hq-reader-frontend"
   },
   "dependencies": {

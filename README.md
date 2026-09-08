@@ -200,3 +200,11 @@ A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **
 - Quando o deploy possui armazenamento persistente, novas fontes adicionadas pelo administrador também são registradas no catálogo do servidor.
 - A aplicação continua exibindo o catálogo já disponível caso alguma pasta pública esteja temporariamente indisponível durante a sincronização automática.
 
+
+
+## Varredura completa de grandes Drives (v2.1.1)
+
+- O Drive Marvel Extra agora usa um mapa de bootstrap com **221 pastas conhecidas** logo abaixo de `MARVEL DRIVE` e `MARVEL INDIVIDUAL`, evitando depender apenas da listagem HTML parcial do Google Drive.
+- A sincronização automática roda **uma fonte por requisição**, dando a cada Drive sua própria janela de execução e salvando os resultados progressivamente no navegador.
+- A página inicial atualiza a contagem de HQs conforme cada fonte termina, em vez de esperar todas as pastas concluírem.
+- Se uma fonte falhar, a sincronização não é marcada como concluída e será tentada novamente na próxima abertura.

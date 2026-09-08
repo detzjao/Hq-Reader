@@ -1,5 +1,6 @@
 import { publicComic, getCatalog, isBlobConfigured, saveCatalogSource, saveSyncSnapshot } from './catalog.js';
 import { mimeForName } from './formats.js';
+import { bootstrapFoldersForSource } from './sourceBootstrap.js';
 
 const SUPPORTED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'cbz', 'cbr']);
 
@@ -236,12 +237,22 @@ async function resolveShortcutTarget(item) {
 }
 
 async function crawlSource(source) {
-  const maxFolders = Number(process.env.PUBLIC_FOLDER_MAX_FOLDERS || 2500);
-  const maxFiles = Number(process.env.PUBLIC_FOLDER_MAX_FILES || 25_000);
-  const concurrency = Math.max(1, Math.min(8, Number(process.env.PUBLIC_FOLDER_CONCURRENCY || 5)));
+  const maxFolders = Number(process.env.PUBLIC_FOLDER_MAX_FOLDERS || 3500);
+  const maxFiles = Number(process.env.PUBLIC_FOLDER_MAX_FILES || 30_000);
+  const bootstrapFolders = bootstrapFoldersForSource(source.id);
+  const requestedConcurrency = Number(process.env.PUBLIC_FOLDER_CONCURRENCY || (bootstrapFolders.length ? 8 : 5));
+  const concurrency = Math.max(1, Math.min(8, requestedConcurrency));
   const visitedFolders = new Set();
   const files = new Map();
-  let frontier = [{ id: source.id, path: source.path || source.category, resourceKey: source.resourceKey || '' }];
+  const rootPath = source.path || source.category;
+  let frontier = [
+    { id: source.id, path: rootPath, resourceKey: source.resourceKey || '' },
+    ...bootstrapFolders.map((folder) => ({
+      id: folder.id,
+      path: `${rootPath}/${folder.group || 'Drive'}`.replace(/\/{2,}/g, '/'),
+      resourceKey: folder.resourceKey || ''
+    }))
+  ];
   let failedFolders = 0;
 
   while (frontier.length) {
@@ -317,7 +328,7 @@ async function crawlSource(source) {
     throw error;
   }
 
-  return { source, files: [...files.values()], folders: visitedFolders.size, failedFolders };
+  return { source, files: [...files.values()], folders: visitedFolders.size, failedFolders, bootstrapFolders: bootstrapFolders.length };
 }
 
 function transientPublicComic(file) {
@@ -331,7 +342,7 @@ function transientPublicComic(file) {
   return comic;
 }
 
-export async function syncConfiguredSources({ extraSources = [] } = {}) {
+export async function syncConfiguredSources({ extraSources = [], sourceIds = [] } = {}) {
   const catalog = await getCatalog({ force: true });
   const sourceById = new Map();
   for (const source of catalog.sources || []) {
@@ -346,7 +357,8 @@ export async function syncConfiguredSources({ extraSources = [] } = {}) {
       // Ignora fontes locais antigas ou inválidas sem derrubar a sincronização das demais.
     }
   }
-  const sources = [...sourceById.values()];
+  const requestedSourceIds = new Set((Array.isArray(sourceIds) ? sourceIds : []).map((id) => String(id || '').trim()).filter(Boolean));
+  const sources = [...sourceById.values()].filter((source) => !requestedSourceIds.size || requestedSourceIds.has(source.id));
   if (!sources.length) return { ok: true, files: [], sources: [], added: 0, found: 0, total: catalog.files.length, persisted: false };
 
   const results = await Promise.allSettled(sources.map(crawlSource));
@@ -368,7 +380,8 @@ export async function syncConfiguredSources({ extraSources = [] } = {}) {
       ok: true,
       files: result.value.files.length,
       folders: result.value.folders,
-      failedFolders: result.value.failedFolders
+      failedFolders: result.value.failedFolders,
+      bootstrapFolders: result.value.bootstrapFolders || 0
     });
   });
 
@@ -377,7 +390,9 @@ export async function syncConfiguredSources({ extraSources = [] } = {}) {
   let persisted = false;
   if (found.length && isBlobConfigured()) {
     try {
-      await saveSyncSnapshot(found);
+      // Cada fonte pode ser sincronizada em uma requisição separada. Mantém o catálogo
+      // já conhecido no snapshot para a próxima fonte não apagar os resultados anteriores.
+      await saveSyncSnapshot([...catalog.files, ...found]);
       persisted = true;
     } catch {
       // A varredura continua útil no navegador mesmo se a persistência não estiver disponível.
@@ -403,7 +418,7 @@ export async function addPublicFolderSource({ url, label = '', path = '', catego
   if (isBlobConfigured()) {
     try { sourcePersisted = await saveCatalogSource(source); } catch { sourcePersisted = false; }
   }
-  const sync = await syncConfiguredSources({ extraSources: sourcePersisted ? [] : [source] });
+  const sync = await syncConfiguredSources({ extraSources: sourcePersisted ? [] : [source], sourceIds: [source.id] });
   const sourceSummary = (sync.sources || []).find((item) => item.id === source.id) || null;
   return { source, sourcePersisted, sourceSummary, sync };
 }

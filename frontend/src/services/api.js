@@ -138,14 +138,66 @@ async function getComic(id) {
   return request(`/api/comic?id=${encodeURIComponent(id)}`);
 }
 
-async function syncLibrarySources() {
-  const result = await request('/api/library', {
-    method: 'POST',
-    timeout: 290_000,
-    body: JSON.stringify({ action: 'sync', sources: getCustomSources() })
-  });
-  if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
-  return result;
+async function syncLibrarySources({ onProgress } = {}) {
+  const customSources = getCustomSources();
+  let status = { sources: [] };
+  try { status = await request('/api/library', { timeout: 30_000 }); } catch {}
+
+  const sourceById = new Map();
+  for (const source of status.sources || []) if (source?.id) sourceById.set(source.id, source);
+  for (const source of customSources) if (source?.id) sourceById.set(source.id, source);
+  const sources = [...sourceById.values()];
+
+  // Cada Drive recebe sua própria janela de execução. Isso evita que uma coleção
+  // muito grande consuma o tempo das demais e permite salvar o que já foi encontrado.
+  if (!sources.length) {
+    const result = await request('/api/library', {
+      method: 'POST',
+      timeout: 290_000,
+      body: JSON.stringify({ action: 'sync', sources: customSources })
+    });
+    if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
+    return result;
+  }
+
+  const allFiles = new Map();
+  const summaries = [];
+  let added = 0;
+  let total = 0;
+  let persisted = false;
+
+  for (let index = 0; index < sources.length; index += 1) {
+    const source = sources[index];
+    try {
+      const result = await request('/api/library', {
+        method: 'POST',
+        timeout: 290_000,
+        body: JSON.stringify({ action: 'sync', sources: customSources, sourceIds: [source.id] })
+      });
+      for (const file of result.files || []) if (file?.id) allFiles.set(file.id, file);
+      if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
+      summaries.push(...(result.sources || []));
+      added += Number(result.added || 0);
+      total = Math.max(total, Number(result.total || 0));
+      persisted = persisted || Boolean(result.persisted);
+      if (onProgress) await onProgress({ source, index, totalSources: sources.length, result });
+    } catch (error) {
+      summaries.push({ id: source.id, label: source.label, category: source.category, ok: false, error: error.message || 'Falha na varredura.' });
+      if (onProgress) await onProgress({ source, index, totalSources: sources.length, error });
+    }
+  }
+
+  const successful = summaries.filter((item) => item.ok).length;
+  return {
+    ok: successful > 0,
+    partial: successful < summaries.length,
+    sources: summaries,
+    files: [...allFiles.values()],
+    found: allFiles.size,
+    added,
+    total,
+    persisted
+  };
 }
 
 async function addToLibrary({ url, name, path }) {

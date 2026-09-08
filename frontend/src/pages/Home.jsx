@@ -8,7 +8,7 @@ import SearchBar from '../components/SearchBar.jsx';
 import { api } from '../services/api.js';
 
 const CATEGORY_ORDER = ['Marvel', 'DC Comics', 'Turma da Mônica', 'Outros'];
-const AUTO_SYNC_SESSION_KEY = 'hq-reader:auto-drive-sync';
+const AUTO_SYNC_SESSION_KEY = 'hq-reader:auto-drive-sync:v2.2';
 
 export default function Home() {
   const [comics, setComics] = useState([]);
@@ -16,6 +16,8 @@ export default function Home() {
   const [category, setCategory] = useState('Todas');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState('');
   const searchRef = useRef(null);
 
   async function load({ silent = false } = {}) {
@@ -35,16 +37,32 @@ export default function Home() {
     async function syncDrivesOnStart() {
       try {
         if (sessionStorage.getItem(AUTO_SYNC_SESSION_KEY) === '1') return;
-        sessionStorage.setItem(AUTO_SYNC_SESSION_KEY, '1');
       } catch {}
 
       try {
-        await api.syncLibrarySources();
+        if (active) setSyncing(true);
+        const sync = await api.syncLibrarySources({
+          onProgress: async ({ source, index, totalSources }) => {
+            if (!active) return;
+            setSyncProgress(`${source?.label || 'Drive'} · ${index + 1}/${totalSources}`);
+            try {
+              const data = await api.getComics(true);
+              if (active) setComics(data.files || []);
+            } catch {}
+          }
+        });
         if (!active) return;
         const data = await api.getComics(true);
         if (active) setComics(data.files || []);
+        // Só marca como concluído se todas as fontes terminaram. Se alguma falhar,
+        // um novo carregamento tenta novamente em vez de ficar preso no catálogo antigo.
+        if (!sync?.partial) {
+          try { sessionStorage.setItem(AUTO_SYNC_SESSION_KEY, '1'); } catch {}
+        }
       } catch {
-        // A biblioteca inicial continua utilizável mesmo se uma pasta pública estiver temporariamente indisponível.
+        // A biblioteca inicial continua utilizável e a próxima abertura tenta novamente.
+      } finally {
+        if (active) { setSyncing(false); setSyncProgress(''); }
       }
     }
 
@@ -88,7 +106,7 @@ export default function Home() {
         <section className="mb-9">
           <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
             <div><p className="text-xs font-bold uppercase tracking-[0.25em] text-red-500">Biblioteca de HQs</p><h1 className="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">Sua biblioteca</h1></div>
-            {!loading && !error && <p className="text-sm font-medium text-zinc-600">{comics.length} {comics.length === 1 ? 'HQ' : 'HQs'}</p>}
+            {!loading && !error && <p className="text-sm font-medium text-zinc-600">{comics.length} {comics.length === 1 ? 'HQ' : 'HQs'}{syncing ? ` · sincronizando ${syncProgress || 'Drives…'}` : ''}</p>}
           </div>
           <SearchBar ref={searchRef} value={search} onChange={setSearch} />
           {!loading && !error && categories.length > 0 && (
