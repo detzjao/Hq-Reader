@@ -8,7 +8,6 @@
   ],
   "scripts": {
     "build": "npm run build --workspace hq-reader-frontend",
-    "dev": "npx vercel dev",
     "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/publicFolderSync.js && node --check server/archiveCache.js && node --check api/index.js"
   },
   "dependencies": {
