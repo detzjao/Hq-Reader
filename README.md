@@ -143,3 +143,7 @@ hq-reader/
 ## Observação sobre o Google Drive
 
 As HQs já catalogadas continuam usando seus arquivos públicos do Drive como origem. Nenhuma API Key do Google é necessária. Novos arquivos podem ser adicionados por link individual ou enviados diretamente para o Vercel Blob.
+
+## Vercel / npm 11 — esbuild
+
+O projeto aprova explicitamente o script de instalação do `esbuild@0.25.12` no `package.json` por meio de `allowScripts`. Isso evita que builds com npm 11 parem ou emitam pendência de aprovação antes do `vite build`.
