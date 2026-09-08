@@ -563,7 +563,9 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [] 
       await saveSyncSnapshot([...catalog.files, ...found]);
       persisted = true;
     } catch {
-      // A varredura continua útil no navegador mesmo se a persistência não estiver disponível.
+      // Não confirma uma sincronização que existiria só neste aparelho. Para a biblioteca
+      // ser igual em todos os dispositivos, os resultados precisam chegar ao catálogo global.
+      throw persistentStorageError('As HQs foram encontradas, mas não foi possível salvá-las na biblioteca compartilhada.');
     }
   }
 
@@ -580,14 +582,50 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [] 
   };
 }
 
+function persistentStorageError(message = 'Não foi possível salvar a biblioteca de forma compartilhada no servidor.') {
+  const error = new Error(message);
+  error.code = 'PERSISTENT_LIBRARY_UNAVAILABLE';
+  error.status = 503;
+  return error;
+}
+
+export async function registerPublicFolderSources(inputs = []) {
+  if (!isBlobConfigured()) throw persistentStorageError();
+  const sources = [];
+  const failed = [];
+  const unique = new Map();
+  for (const input of Array.isArray(inputs) ? inputs.slice(0, 50) : []) {
+    try {
+      const source = normalizePublicFolderSource(input);
+      unique.set(source.id, source);
+    } catch (error) {
+      failed.push({ input: input?.url || input?.id || '', error: error?.message || 'Fonte inválida.' });
+    }
+  }
+  for (const source of unique.values()) {
+    try {
+      const persisted = await saveCatalogSource(source);
+      if (!persisted) throw persistentStorageError();
+      sources.push(source);
+    } catch (error) {
+      failed.push({ id: source.id, label: source.label, error: error?.message || 'Falha ao salvar a fonte.' });
+    }
+  }
+  if (!sources.length && unique.size) throw persistentStorageError(failed[0]?.error || undefined);
+  return { saved: sources.length, sources, failed };
+}
+
 export async function addPublicFolderSource({ url, label = '', path = '', category = '' } = {}) {
   const source = normalizePublicFolderSource({ url, label, path, category });
-  let sourcePersisted = false;
-  if (isBlobConfigured()) {
-    try { sourcePersisted = await saveCatalogSource(source); } catch { sourcePersisted = false; }
-  }
-  const sync = await syncConfiguredSources({ extraSources: sourcePersisted ? [] : [source], sourceIds: [source.id] });
+  if (!isBlobConfigured()) throw persistentStorageError();
+  const sourcePersisted = await saveCatalogSource(source);
+  if (!sourcePersisted) throw persistentStorageError();
+
+  // A fonte primeiro vira parte do catálogo compartilhado. Só depois iniciamos a
+  // varredura. Assim, mesmo que um Drive enorme demore ou falhe temporariamente,
+  // outro dispositivo já conhece a fonte e pode tentar sincronizá-la novamente.
+  const sync = await syncConfiguredSources({ sourceIds: [source.id] });
   const sourceSummary = (sync.sources || []).find((item) => item.id === source.id) || null;
-  return { source, sourcePersisted, sourceSummary, sync };
+  return { source, sourcePersisted: true, sourceSummary, sync };
 }
 

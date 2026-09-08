@@ -19,7 +19,17 @@ let syncSnapshotCache = { at: 0, files: null };
 let sourceCache = { at: 0, sources: null };
 
 export function isBlobConfigured() {
-  return Boolean(String(process.env.BLOB_READ_WRITE_TOKEN || '').trim());
+  // Vercel Blob pode autenticar de duas formas:
+  // 1) token legado BLOB_READ_WRITE_TOKEN;
+  // 2) OIDC (padrão atual da Vercel), identificado pelo BLOB_STORE_ID.
+  //
+  // Em Functions o token OIDC é injetado no contexto da requisição e o
+  // @vercel/blob >= 2.4 o resolve automaticamente. Por isso não devemos
+  // exigir BLOB_READ_WRITE_TOKEN para considerar o armazenamento conectado.
+  return Boolean(
+    String(process.env.BLOB_READ_WRITE_TOKEN || '').trim()
+    || String(process.env.BLOB_STORE_ID || '').trim()
+  );
 }
 
 async function seed() {
