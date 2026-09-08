@@ -1,18 +1,15 @@
 {
   "name": "hq-reader-vercel",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "private": true,
   "type": "module",
   "workspaces": [
     "frontend"
   ],
-  "engines": {
-    "node": "22.x"
-  },
   "scripts": {
     "build": "npm run build --workspace hq-reader-frontend",
     "dev": "npx vercel dev",
-    "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/publicFolderSync.js && node --check server/archiveCache.js && node --check api/comics.js && node --check api/content.js && node --check api/archive.js && node --check api/blob-upload.js && node --check api/library.js"
+    "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/publicFolderSync.js && node --check server/archiveCache.js && node --check api/index.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

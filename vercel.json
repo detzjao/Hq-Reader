@@ -3,23 +3,23 @@
   "buildCommand": "npm run build",
   "outputDirectory": "frontend/dist",
   "functions": {
-    "api/content.js": {
-      "maxDuration": 300
-    },
-    "api/archive.js": {
-      "maxDuration": 300
-    },
-    "api/library-import.js": {
-      "maxDuration": 300
-    },
-    "api/library.js": {
+    "api/index.js": {
       "maxDuration": 300
     }
   },
   "rewrites": [
-    {
-      "source": "/reader/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/archive", "destination": "/api/index?route=archive" },
+    { "source": "/api/blob-upload", "destination": "/api/index?route=blob-upload" },
+    { "source": "/api/comic", "destination": "/api/index?route=comic" },
+    { "source": "/api/comics", "destination": "/api/index?route=comics" },
+    { "source": "/api/content", "destination": "/api/index?route=content" },
+    { "source": "/api/download", "destination": "/api/index?route=download" },
+    { "source": "/api/health", "destination": "/api/index?route=health" },
+    { "source": "/api/library-add", "destination": "/api/index?route=library-add" },
+    { "source": "/api/library-delete", "destination": "/api/index?route=library-delete" },
+    { "source": "/api/library-import", "destination": "/api/index?route=library-import" },
+    { "source": "/api/library-upload-meta", "destination": "/api/index?route=library-upload-meta" },
+    { "source": "/api/library", "destination": "/api/index?route=library" },
+    { "source": "/reader/(.*)", "destination": "/index.html" }
   ]
 }
