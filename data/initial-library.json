@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updatedAt": "2026-09-08T07:01:20.872385+00:00",
+  "updatedAt": "2026-09-08T10:25:00.000Z",
   "sourceFolderId": "1IShfGFxk8qG4JQ6TXk1vLHrXRp7KF7ci",
   "files": [
     {
@@ -9285,6 +9285,13 @@
       "label": "Turma da Mônica",
       "category": "Turma da Mônica",
       "url": "https://drive.google.com/drive/folders/1LtX8qYpKFYp5pfMK4FWiO6EZPpLey49D",
+      "enabled": true
+    },
+    {
+      "id": "1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6",
+      "label": "Marvel Comics Extra",
+      "category": "Marvel",
+      "url": "https://drive.google.com/drive/folders/1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6",
       "enabled": true
     }
   ]

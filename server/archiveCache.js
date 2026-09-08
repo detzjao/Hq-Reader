@@ -25,12 +25,11 @@ async function fileBuffer(file) {
   return Buffer.concat(chunks, total);
 }
 
-export async function getArchivePages(id) {
-  const file = await getComic(id);
+export async function getArchivePagesForFile(file, { persist = false } = {}) {
   const ext = extension(file.name);
   if (!['cbz', 'cbr'].includes(ext)) { const e = new Error('Esta HQ não é um arquivo CBZ/CBR.'); e.code = 'NOT_ARCHIVE'; e.status = 400; throw e; }
   if (Array.isArray(file.archivePages) && file.archivePages.length) return file.archivePages;
-  if (!isBlobConfigured()) { const e = new Error('Conecte o Vercel Blob para abrir arquivos CBZ/CBR.'); e.code = 'BLOB_NOT_CONFIGURED'; e.status = 503; throw e; }
+  if (!isBlobConfigured()) { const e = new Error('O armazenamento de páginas compactadas não está disponível.'); e.code = 'BLOB_NOT_CONFIGURED'; e.status = 503; throw e; }
 
   const buffer = await fileBuffer(file);
   const extracted = ext === 'cbz' ? extractCbz(buffer) : await extractCbr(buffer);
@@ -40,13 +39,18 @@ export async function getArchivePages(id) {
     const uploaded = await Promise.all(batch.map(async (page, index) => {
       const pageNumber = offset + index + 1;
       const pageExt = extension(page.name) || 'jpg';
-      const blob = await put(`hq-reader/archive-pages/${encodeURIComponent(id)}/${String(pageNumber).padStart(4, '0')}.${pageExt}`, page.data, {
+      const blob = await put(`hq-reader/archive-pages/${encodeURIComponent(file.id)}/${String(pageNumber).padStart(4, '0')}.${pageExt}`, page.data, {
         access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: page.mimeType, cacheControlMaxAge: 31536000
       });
       return { page: pageNumber, url: blob.url, mimeType: page.mimeType };
     }));
     pages.push(...uploaded);
   }
-  await updateComicRevision(id, { archivePages: pages });
+  if (persist) await updateComicRevision(file.id, { archivePages: pages });
   return pages;
+}
+
+export async function getArchivePages(id) {
+  const file = await getComic(id);
+  return getArchivePagesForFile(file, { persist: true });
 }

@@ -11,8 +11,10 @@ import { naturalSort } from './naturalSort.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INITIAL_PATH = path.resolve(__dirname, '../data/initial-library.json');
 const REVISION_PREFIX = 'hq-reader/catalog-revisions/';
+const SYNC_SNAPSHOT_PREFIX = 'hq-reader/sync-snapshots/';
 let seedPromise = null;
 let dynamicCache = { at: 0, files: null };
+let syncSnapshotCache = { at: 0, files: null };
 
 export function isBlobConfigured() {
   return Boolean(String(process.env.BLOB_READ_WRITE_TOKEN || '').trim());
@@ -65,6 +67,47 @@ async function dynamicRevisions({ force = false } = {}) {
   return revisions;
 }
 
+
+async function latestSyncSnapshot({ force = false } = {}) {
+  if (!isBlobConfigured()) return [];
+  const ttl = Number(process.env.CATALOG_CACHE_MS || 20_000);
+  if (!force && syncSnapshotCache.files && Date.now() - syncSnapshotCache.at < ttl) return syncSnapshotCache.files;
+  const blobs = await listAllBlobs(SYNC_SNAPSHOT_PREFIX);
+  if (!blobs.length) {
+    syncSnapshotCache = { at: Date.now(), files: [] };
+    return [];
+  }
+  const latest = [...blobs].sort((a, b) => {
+    const at = Date.parse(a.uploadedAt || 0) || Number(String(a.pathname || '').match(/(\d{13})/)?.[1] || 0);
+    const bt = Date.parse(b.uploadedAt || 0) || Number(String(b.pathname || '').match(/(\d{13})/)?.[1] || 0);
+    return bt - at;
+  })[0];
+  try {
+    const value = await fetchJson(latest.url);
+    const files = Array.isArray(value?.files) ? value.files : [];
+    syncSnapshotCache = { at: Date.now(), files };
+    return files;
+  } catch {
+    syncSnapshotCache = { at: Date.now(), files: [] };
+    return [];
+  }
+}
+
+export async function saveSyncSnapshot(files) {
+  if (!isBlobConfigured()) return false;
+  const unique = [...new Map((files || []).filter((file) => file?.id).map((file) => [file.id, file])).values()];
+  const payload = { syncedAt: new Date().toISOString(), files: unique };
+  const pathname = `${SYNC_SNAPSHOT_PREFIX}${Date.now()}-${crypto.randomUUID()}.json`;
+  await put(pathname, JSON.stringify(payload), {
+    access: 'public',
+    addRandomSuffix: false,
+    contentType: 'application/json',
+    cacheControlMaxAge: 31536000
+  });
+  syncSnapshotCache = { at: Date.now(), files: unique };
+  return true;
+}
+
 function latestRevisionById(revisions) {
   const latest = new Map();
   for (const revision of revisions) {
@@ -106,6 +149,12 @@ export function publicComic(file) {
 export async function getCatalog({ force = false } = {}) {
   const base = await seed();
   const byId = new Map(base.files.map((file) => [file.id, { ...file, category: normalizedCategory(file) }]));
+  const syncedFiles = await latestSyncSnapshot({ force });
+  for (const file of syncedFiles) {
+    if (!file?.id) continue;
+    const previous = byId.get(file.id) || {};
+    byId.set(file.id, { ...previous, ...file, category: normalizedCategory(file) });
+  }
   const latest = latestRevisionById(await dynamicRevisions({ force }));
   for (const [id, revision] of latest) {
     if (revision.deleted) byId.delete(id);
@@ -133,6 +182,7 @@ export async function writeRevision(file) {
   const pathname = `${REVISION_PREFIX}${encodeURIComponent(file.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
   await put(pathname, JSON.stringify(revision), { access: 'public', addRandomSuffix: false, contentType: 'application/json', cacheControlMaxAge: 31536000 });
   dynamicCache = { at: 0, files: null };
+  syncSnapshotCache = { at: 0, files: null };
   return revision;
 }
 

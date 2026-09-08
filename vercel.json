@@ -3,11 +3,23 @@
   "buildCommand": "npm run build",
   "outputDirectory": "frontend/dist",
   "functions": {
-    "api/content.js": { "maxDuration": 300 },
-    "api/archive.js": { "maxDuration": 300 },
-    "api/library-import.js": { "maxDuration": 300 }
+    "api/content.js": {
+      "maxDuration": 300
+    },
+    "api/archive.js": {
+      "maxDuration": 300
+    },
+    "api/library-import.js": {
+      "maxDuration": 300
+    },
+    "api/library-sync.js": {
+      "maxDuration": 300
+    }
   },
   "rewrites": [
-    { "source": "/reader/(.*)", "destination": "/index.html" }
+    {
+      "source": "/reader/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

@@ -167,15 +167,29 @@ export default function LibraryManager() {
   }
 
   async function handleRefreshDatabase() {
+    if (!canWrite()) {
+      setError('Entre com a senha administrativa antes de atualizar a base.');
+      setMessage('');
+      return;
+    }
     setRefreshingDatabase(true);
     setError('');
     setMessage('');
     try {
+      const sync = await api.syncLibrarySources();
       const response = await api.getComics(true);
       const files = response.files || [];
       setComics(files);
       notifyUpdate();
-      setMessage(`Base de dados atualizada. ${files.length} ${files.length === 1 ? 'HQ carregada' : 'HQs carregadas'}.`);
+
+      const sourceText = (sync.sources || [])
+        .filter((source) => source.ok)
+        .map((source) => `${source.category}: ${source.files}`)
+        .join(' · ');
+      const failed = (sync.sources || []).filter((source) => !source.ok);
+      const newText = sync.added ? ` ${sync.added} novas HQs encontradas.` : ' Nenhuma HQ nova encontrada.';
+      setMessage(`Varredura concluída.${newText} Total disponível: ${files.length}.${sourceText ? ` ${sourceText}.` : ''}`);
+      if (failed.length) setError(failed.map((source) => `${source.category}: ${source.error}`).join(' • '));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -204,17 +218,17 @@ export default function LibraryManager() {
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><RefreshCw className="h-5 w-5" /></span>
             <div>
               <h3 className="text-lg font-bold text-white">Base de dados</h3>
-              <p className="mt-0.5 text-sm text-zinc-500">Recarrega o catálogo e aplica as alterações mais recentes.</p>
+              <p className="mt-0.5 text-sm text-zinc-500">Varre novamente as pastas da Marvel, DC Comics e Turma da Mônica e procura novas HQs.</p>
             </div>
           </div>
           <button
             type="button"
             onClick={handleRefreshDatabase}
-            disabled={refreshingDatabase}
+            disabled={refreshingDatabase || !canWrite()}
             className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-bold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${refreshingDatabase ? 'animate-spin' : ''}`} />
-            {refreshingDatabase ? 'Atualizando...' : 'Atualizar base de dados'}
+            {refreshingDatabase ? 'Procurando HQs...' : 'Atualizar base de dados'}
           </button>
         </div>
       </section>

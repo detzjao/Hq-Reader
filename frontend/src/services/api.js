@@ -1,6 +1,7 @@
 import { upload } from '@vercel/blob/client';
 
 const ADMIN_STORAGE_KEY = 'hq-reader:admin-token';
+const DISCOVERED_STORAGE_KEY = 'hq-reader:drive-sync-files';
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR' } = {}) {
@@ -22,6 +23,31 @@ export function setAdminToken(value) {
     else localStorage.removeItem(ADMIN_STORAGE_KEY);
   } catch {}
   return clean;
+}
+
+function getDiscoveredComics() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DISCOVERED_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.name) : [];
+  } catch { return []; }
+}
+
+function saveDiscoveredComics(files) {
+  const unique = [...new Map((files || []).filter((item) => item?.id && item?.name).map((item) => [item.id, item])).values()];
+  try { localStorage.setItem(DISCOVERED_STORAGE_KEY, JSON.stringify(unique)); } catch {}
+  return unique;
+}
+
+function findDiscoveredComic(id) {
+  return getDiscoveredComics().find((item) => item.id === id) || null;
+}
+
+function mergeComics(serverFiles = []) {
+  const byId = new Map((serverFiles || []).map((item) => [item.id, item]));
+  for (const comic of getDiscoveredComics()) {
+    if (!byId.has(comic.id)) byId.set(comic.id, comic);
+  }
+  return [...byId.values()];
 }
 
 async function parseError(response) {
@@ -81,16 +107,48 @@ export async function uploadThumbnailBlob(blob, filename) {
   } catch { return null; }
 }
 
+async function getComics(fresh = false) {
+  const response = await request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`);
+  return { ...response, files: mergeComics(response.files || []) };
+}
+
+async function getComic(id) {
+  const discovered = findDiscoveredComic(id);
+  if (discovered) return { comic: discovered };
+  return request(`/api/comic?id=${encodeURIComponent(id)}`);
+}
+
+async function syncLibrarySources() {
+  const result = await request('/api/library-sync', { method: 'POST', admin: true, timeout: 290_000 });
+  if (Array.isArray(result.files)) saveDiscoveredComics(result.files);
+  return result;
+}
+
+function directParams(comic) {
+  if (!comic?.discoveredBySync) return '';
+  const params = new URLSearchParams({ direct: '1' });
+  if (comic.resourceKey) params.set('resourceKey', comic.resourceKey);
+  return `&${params.toString()}`;
+}
+
 export const api = {
   health: () => request('/api/health'),
-  getComics: (fresh = false) => request(`/api/comics${fresh ? `?fresh=${Date.now()}` : ''}`),
-  getComic: (id) => request(`/api/comic?id=${encodeURIComponent(id)}`),
-  getArchivePages: (id) => request(`/api/archive?id=${encodeURIComponent(id)}`, { timeout: 60_000 }),
+  getComics,
+  getComic,
+  syncLibrarySources,
+  getArchivePages: (id) => {
+    const comic = findDiscoveredComic(id);
+    const extra = comic ? `${directParams(comic)}&name=${encodeURIComponent(comic.name)}` : '';
+    return request(`/api/archive?id=${encodeURIComponent(id)}${extra}`, { timeout: 120_000 });
+  },
   getLibraryStatus: () => request('/api/library'),
   addToLibrary: ({ url, name, path }) => request('/api/library-add', { method: 'POST', admin: true, body: JSON.stringify({ url, name, path }) }),
   importLibrary: (text) => request('/api/library-import', { method: 'POST', admin: true, body: JSON.stringify({ text }), timeout: 60_000 }),
   registerUpload: ({ blob, originalName, size, path, thumbnailUrl }) => request('/api/library-upload-meta', { method: 'POST', admin: true, body: JSON.stringify({ blob, originalName, size, path, thumbnailUrl }) }),
   removeFromLibrary: (id) => request(`/api/library-delete?id=${encodeURIComponent(id)}`, { method: 'DELETE', admin: true }),
   assetUrl: (value = '') => /^https?:\/\//i.test(value) ? value : value,
-  downloadUrl: (id) => `/api/download?id=${encodeURIComponent(id)}`
+  downloadUrl: (id) => {
+    const comic = findDiscoveredComic(id);
+    return `/api/download?id=${encodeURIComponent(id)}${comic ? directParams(comic) : ''}`;
+  }
 };

@@ -171,3 +171,22 @@ A interface exibe somente o acesso administrativo, sem os painéis técnicos de 
 - Os botões `+` e `-` preservam o centro atual da leitura; tocar no percentual restaura 100%.
 - Ao trocar de página com zoom aplicado, a nova página abre no topo e centralizada horizontalmente.
 - No iPhone/iPad o leitor usa `100dvh` para se adaptar melhor às barras dinâmicas do Safari.
+
+## Atualização das pastas do Drive (v2.0.6)
+
+O botão **Atualizar base de dados** agora executa uma nova varredura das três fontes configuradas (Marvel, DC Comics e Turma da Mônica), percorre subpastas públicas, tenta resolver atalhos e adiciona ao catálogo em uso as HQs públicas encontradas que ainda não estavam na base inicial. A varredura só acontece quando o botão é acionado.
+
+Quando houver armazenamento persistente configurado no deploy, o resultado também é salvo como snapshot do catálogo. Sem armazenamento persistente, o resultado da varredura fica salvo no navegador e continua disponível naquele dispositivo, inclusive para abrir PDFs encontrados na nova busca.
+
+
+## Fontes padrão
+
+O botão **Atualizar base de dados** varre estas fontes públicas do Google Drive:
+
+- Marvel Comics
+- Marvel Comics Extra — `1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6`
+- DC Comics
+- Turma da Mônica
+
+A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **MARVEL DRIVE**.
+
