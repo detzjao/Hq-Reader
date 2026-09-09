@@ -13,10 +13,12 @@ const INITIAL_PATH = path.resolve(__dirname, '../data/initial-library.json');
 const REVISION_PREFIX = 'hq-reader/catalog-revisions/';
 const SYNC_SNAPSHOT_PREFIX = 'hq-reader/sync-snapshots/';
 const SOURCE_REVISION_PREFIX = 'hq-reader/source-revisions/';
+const SOURCE_SYNC_STATUS_PREFIX = 'hq-reader/source-sync-status/';
 let seedPromise = null;
 let dynamicCache = { at: 0, files: null };
 let syncSnapshotCache = { at: 0, files: null };
 let sourceCache = { at: 0, sources: null };
+let sourceSyncStatusCache = { at: 0, statuses: null };
 
 let metadataBlobAccess = null;
 
@@ -148,6 +150,42 @@ async function dynamicSourceRevisions({ force = false } = {}) {
   }
   sourceCache = { at: Date.now(), sources: revisions };
   return revisions;
+}
+
+async function dynamicSourceSyncStatuses({ force = false } = {}) {
+  if (!isBlobConfigured()) return [];
+  const ttl = Number(process.env.CATALOG_CACHE_MS || 20_000);
+  if (!force && sourceSyncStatusCache.statuses && Date.now() - sourceSyncStatusCache.at < ttl) return sourceSyncStatusCache.statuses;
+  const blobs = await listAllBlobs(SOURCE_SYNC_STATUS_PREFIX);
+  const revisions = [];
+  for (let offset = 0; offset < blobs.length; offset += 20) {
+    const batch = blobs.slice(offset, offset + 20);
+    const values = await Promise.allSettled(batch.map((blob) => fetchJsonBlob(blob)));
+    for (const value of values) if (value.status === 'fulfilled' && value.value?.id) revisions.push(value.value);
+  }
+  sourceSyncStatusCache = { at: Date.now(), statuses: revisions };
+  return revisions;
+}
+
+function latestStatusById(revisions) {
+  const latest = new Map();
+  for (const revision of revisions) {
+    const previous = latest.get(revision.id);
+    const currentTime = Date.parse(revision._revisionAt || revision.syncedAt || 0) || 0;
+    const previousTime = Date.parse(previous?._revisionAt || previous?.syncedAt || 0) || 0;
+    if (!previous || currentTime >= previousTime) latest.set(revision.id, revision);
+  }
+  return latest;
+}
+
+export async function saveSourceSyncStatus(status) {
+  if (!isBlobConfigured() || !status?.id) return false;
+  const now = new Date().toISOString();
+  const revision = { ...status, syncedAt: status.syncedAt || now, _revisionAt: now };
+  const pathname = `${SOURCE_SYNC_STATUS_PREFIX}${encodeURIComponent(status.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
+  await putMetadataBlob(pathname, JSON.stringify(revision));
+  sourceSyncStatusCache = { at: 0, statuses: null };
+  return true;
 }
 
 function latestSourceById(revisions) {
@@ -390,15 +428,52 @@ export async function removeComic(id) {
   return { removed: id };
 }
 
-export async function libraryStatus() {
-  const catalog = await getCatalog();
+export async function libraryStatus({ force = false } = {}) {
+  const catalog = await getCatalog({ force });
   const counts = {};
-  for (const file of catalog.files) counts[normalizedCategory(file)] = (counts[normalizedCategory(file)] || 0) + 1;
+  const metricsBySource = new Map();
+
+  for (const file of catalog.files) {
+    const category = normalizedCategory(file);
+    counts[category] = (counts[category] || 0) + 1;
+    const sourceId = String(file.sourceFolderId || '').trim();
+    if (!sourceId) continue;
+    const metrics = metricsBySource.get(sourceId) || { files: 0, pdf: 0, cbz: 0, cbr: 0, images: 0, other: 0, lastSyncedAt: null };
+    metrics.files += 1;
+    const ext = extension(file.name).toLowerCase();
+    if (ext === 'pdf') metrics.pdf += 1;
+    else if (ext === 'cbz') metrics.cbz += 1;
+    else if (ext === 'cbr') metrics.cbr += 1;
+    else if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) metrics.images += 1;
+    else metrics.other += 1;
+    const syncedAt = file.syncedAt || file.addedAt || null;
+    if (syncedAt && (!metrics.lastSyncedAt || Date.parse(syncedAt) > Date.parse(metrics.lastSyncedAt))) metrics.lastSyncedAt = syncedAt;
+    metricsBySource.set(sourceId, metrics);
+  }
+
+  const statusById = latestStatusById(await dynamicSourceSyncStatuses({ force }));
+  const sourceStats = (catalog.sources || []).map((source) => {
+    const metrics = metricsBySource.get(source.id) || { files: 0, pdf: 0, cbz: 0, cbr: 0, images: 0, other: 0, lastSyncedAt: null };
+    const status = statusById.get(source.id) || null;
+    return {
+      ...source,
+      files: metrics.files,
+      formats: { pdf: metrics.pdf, cbz: metrics.cbz, cbr: metrics.cbr, images: metrics.images, other: metrics.other },
+      folders: Number(status?.folders || 0),
+      failedFolders: Number(status?.failedFolders || 0),
+      complete: status ? status.complete !== false : null,
+      ok: status ? status.ok !== false : null,
+      lastError: status?.error || '',
+      lastSyncedAt: status?.syncedAt || metrics.lastSyncedAt || null
+    };
+  });
+
   return {
     mode: 'vercel',
     total: catalog.files.length,
     counts,
     sources: catalog.sources,
+    sourceStats,
     blobConfigured: isBlobConfigured(),
     adminConfigured: isAdminConfigured(),
     writeEnabled: isBlobConfigured() && isAdminConfigured(),

@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       res.setHeader('Cache-Control', 'no-store');
-      return res.status(200).json(await libraryStatus());
+      return res.status(200).json(await libraryStatus({ force: Boolean(req.query.fresh) }));
     }
 
     if (req.method === 'POST') {

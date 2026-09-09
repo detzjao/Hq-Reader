@@ -8,18 +8,61 @@
     }
   },
   "rewrites": [
-    { "source": "/api/archive", "destination": "/api/index?route=archive" },
-    { "source": "/api/blob-upload", "destination": "/api/index?route=blob-upload" },
-    { "source": "/api/comic", "destination": "/api/index?route=comic" },
-    { "source": "/api/comics", "destination": "/api/index?route=comics" },
-    { "source": "/api/content", "destination": "/api/index?route=content" },
-    { "source": "/api/download", "destination": "/api/index?route=download" },
-    { "source": "/api/health", "destination": "/api/index?route=health" },
-    { "source": "/api/library-add", "destination": "/api/index?route=library-add" },
-    { "source": "/api/library-delete", "destination": "/api/index?route=library-delete" },
-    { "source": "/api/library-import", "destination": "/api/index?route=library-import" },
-    { "source": "/api/library-upload-meta", "destination": "/api/index?route=library-upload-meta" },
-    { "source": "/api/library", "destination": "/api/index?route=library" },
-    { "source": "/reader/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/archive",
+      "destination": "/api/index?route=archive"
+    },
+    {
+      "source": "/api/blob-upload",
+      "destination": "/api/index?route=blob-upload"
+    },
+    {
+      "source": "/api/comic",
+      "destination": "/api/index?route=comic"
+    },
+    {
+      "source": "/api/comics",
+      "destination": "/api/index?route=comics"
+    },
+    {
+      "source": "/api/content",
+      "destination": "/api/index?route=content"
+    },
+    {
+      "source": "/api/download",
+      "destination": "/api/index?route=download"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/index?route=health"
+    },
+    {
+      "source": "/api/library-add",
+      "destination": "/api/index?route=library-add"
+    },
+    {
+      "source": "/api/library-delete",
+      "destination": "/api/index?route=library-delete"
+    },
+    {
+      "source": "/api/library-import",
+      "destination": "/api/index?route=library-import"
+    },
+    {
+      "source": "/api/library-upload-meta",
+      "destination": "/api/index?route=library-upload-meta"
+    },
+    {
+      "source": "/api/library",
+      "destination": "/api/index?route=library"
+    },
+    {
+      "source": "/api/user-state",
+      "destination": "/api/index?route=user-state"
+    },
+    {
+      "source": "/reader/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

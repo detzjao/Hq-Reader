@@ -223,3 +223,44 @@ Drives adicionados pela tela administrativa passam a ser registrados no catálog
 ## Persistência compartilhada (2.1.6)
 
 A biblioteca dinâmica usa Vercel Blob. A versão 2.1.6 reconhece tanto a conexão atual via OIDC (`BLOB_STORE_ID`) quanto lojas legadas com `BLOB_READ_WRITE_TOKEN`. Em deployments atuais da Vercel, conectar um Blob Store ao projeto é suficiente para o SDK autenticar operações de servidor via OIDC.
+
+
+## Biblioteca e acompanhamento (v2.2.0)
+
+- Nova aba **Continuar lendo**, ordenada pela leitura mais recente.
+- Cards exibem barra e percentual de progresso antes de abrir a HQ.
+- A home agora pode alternar entre **Séries** e **HQs**.
+- Séries usam a hierarquia real das pastas do Drive e abrem uma grade somente com as edições daquela coleção.
+- Pastas bootstrap do Marvel Drive/Marvel Individual passam a recuperar o nome real da pasta durante a varredura, melhorando a organização por série.
+- Administração ganhou o painel **Fontes / Drives**, com HQs por fonte, pastas percorridas, falhas, formatos e última sincronização.
+- Cada Drive pode ser sincronizado individualmente pelo painel.
+- O backend persiste o diagnóstico da última sincronização de cada fonte quando o armazenamento compartilhado está disponível.
+
+## v2.3.0 — Favoritos/progresso compartilhados + PWA + offline
+
+Esta versão transforma o estado de leitura em um perfil compartilhado do próprio deployment:
+
+- favoritos são persistidos no armazenamento compartilhado e aparecem nos demais dispositivos;
+- página atual, total de páginas, status concluído e datas de leitura são sincronizados;
+- dados locais das versões anteriores são migrados sem serem apagados antes da confirmação do servidor;
+- mudanças feitas sem internet entram em uma fila local e são reenviadas ao voltar a ficar online;
+- ao voltar para a aba ou focar o site, o estado compartilhado é atualizado novamente.
+
+### PWA
+
+O frontend inclui `manifest.webmanifest`, Service Worker e ícones próprios. Em navegadores compatíveis, o HQ Reader pode ser instalado como aplicativo. No iOS, use Compartilhar → Adicionar à Tela de Início.
+
+### HQs offline
+
+Cada card e a barra do leitor possuem uma ação para salvar/remover a HQ do armazenamento offline daquele dispositivo.
+
+- PDF: o arquivo completo é armazenado no Cache Storage, com suporte a requisições Range quando estiver offline;
+- imagem: a página original é armazenada;
+- CBZ/CBR: o índice do arquivo compactado e todas as páginas extraídas são armazenados;
+- o shell do aplicativo e respostas recentes de catálogo são mantidos pelo Service Worker para permitir reabrir o leitor sem rede.
+
+O conteúdo offline é propositalmente local ao dispositivo; favoritos e progresso são compartilhados pelo servidor.
+
+### Perfil de leitura
+
+O deployment usa um único perfil de leitura compartilhado. Isso é adequado para uma instalação pessoal do HQ Reader: qualquer dispositivo que abra a mesma implantação recebe os mesmos favoritos e progresso.

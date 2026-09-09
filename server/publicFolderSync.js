@@ -1,4 +1,4 @@
-import { publicComic, getCatalog, isBlobConfigured, saveCatalogSource, saveSyncSnapshot } from './catalog.js';
+import { publicComic, getCatalog, isBlobConfigured, saveCatalogSource, saveSourceSyncStatus, saveSyncSnapshot } from './catalog.js';
 import { ensureSupportedExtension, extension, isSupportedName, mimeForName } from './formats.js';
 import { probePublicFile } from './googleDrive.js';
 import { bootstrapFoldersForSource } from './sourceBootstrap.js';
@@ -230,6 +230,14 @@ function parseDrivePageFallback(html) {
   return [...items.values()];
 }
 
+function folderTitleFromHtml(html = '') {
+  const raw = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '';
+  return decodeHtml(raw)
+    .replace(/\s*[–—-]\s*Google Drive\s*$/i, '')
+    .replace(/\s*-\s*Google Drive\s*$/i, '')
+    .trim();
+}
+
 async function fetchFolderItems(folderId, resourceKey = '') {
   let lastStatus = 0;
   let sawLogin = false;
@@ -254,7 +262,7 @@ async function fetchFolderItems(folderId, resourceKey = '') {
       const flip = parseFlipEntries(html);
       const fallback = parseDrivePageFallback(html);
       const items = mergeFolderItems(anchors, flip, fallback);
-      if (items.length) return items;
+      if (items.length) return { items, folderTitle: folderTitleFromHtml(html) };
     } catch {
       // tenta a próxima visualização pública
     }
@@ -400,7 +408,11 @@ function normalizeContinuation(source, continuation) {
   const visited = Array.isArray(continuation.visited)
     ? continuation.visited.map((id) => String(id || '')).filter(Boolean)
     : [];
-  return { frontier, visited };
+  return {
+    frontier,
+    visited,
+    failedFolders: Math.max(0, Number(continuation.failedFolders || 0) || 0)
+  };
 }
 
 async function crawlSource(source, { continuation = null } = {}) {
@@ -418,16 +430,17 @@ async function crawlSource(source, { continuation = null } = {}) {
   const queue = restored?.frontier?.length
     ? [...restored.frontier]
     : [
-      { id: source.id, path: rootPath, resourceKey: source.resourceKey || '' },
+      { id: source.id, path: rootPath, resourceKey: source.resourceKey || '', root: true },
       ...bootstrapFolders.map((folder) => ({
         id: folder.id,
         path: folder.group
           ? `${rootPath}/${folder.group}`.replace(/\/{2,}/g, '/')
           : rootPath,
-        resourceKey: folder.resourceKey || ''
+        resourceKey: folder.resourceKey || '',
+        bootstrap: true
       }))
     ];
-  let failedFolders = 0;
+  let failedFolders = restored?.failedFolders || 0;
   let foldersProcessed = 0;
 
   while (queue.length) {
@@ -452,20 +465,26 @@ async function crawlSource(source, { continuation = null } = {}) {
     }
 
     const results = await Promise.allSettled(
-      batch.map(async (folder) => ({ folder, items: await fetchFolderItems(folder.id, folder.resourceKey) }))
+      batch.map(async (folder) => {
+        const fetched = await fetchFolderItems(folder.id, folder.resourceKey);
+        return { folder, items: fetched.items, folderTitle: fetched.folderTitle };
+      })
     );
 
     for (const result of results) {
       foldersProcessed += 1;
       if (result.status === 'rejected') { failedFolders += 1; continue; }
-      const { folder, items } = result.value;
+      const { folder, items, folderTitle } = result.value;
+      const effectivePath = folder.bootstrap && folderTitle
+        ? `${folder.path}/${folderTitle}`.replace(/\/{2,}/g, '/')
+        : folder.path;
       const fileCandidates = [];
       for (const item of items) {
         if (item.type === 'folder') {
           if (!visitedFolders.has(item.id)) queue.push({
             id: item.id,
             resourceKey: item.resourceKey || '',
-            path: `${folder.path}/${item.title}`.replace(/\/{2,}/g, '/')
+            path: `${effectivePath}/${item.title}`.replace(/\/{2,}/g, '/')
           });
         } else if (item.type === 'file') {
           fileCandidates.push(item);
@@ -486,7 +505,7 @@ async function crawlSource(source, { continuation = null } = {}) {
               queue.push({
                 id: targetFolder.id,
                 resourceKey: targetFolder.resourceKey || '',
-                path: `${folder.path}/${targetFolder.title || fileBatch[fileIndex]?.title || 'Atalho'}`.replace(/\/{2,}/g, '/')
+                path: `${effectivePath}/${targetFolder.title || fileBatch[fileIndex]?.title || 'Atalho'}`.replace(/\/{2,}/g, '/')
               });
             }
             continue;
@@ -499,7 +518,7 @@ async function crawlSource(source, { continuation = null } = {}) {
             name: fileItem.title,
             mimeType: fileItem.mimeType || mimeForName(fileItem.title),
             size: Number(fileItem.size || 0),
-            path: folder.path,
+            path: effectivePath,
             category: source.category,
             sourceType: 'drive',
             sourceFolderId: source.id,
@@ -538,7 +557,8 @@ async function crawlSource(source, { continuation = null } = {}) {
     continuation: complete ? null : {
       sourceId: source.id,
       frontier: queue,
-      visited: [...visitedFolders]
+      visited: [...visitedFolders],
+      failedFolders
     }
   };
 }
@@ -616,6 +636,14 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [],
       // ser igual em todos os dispositivos, os resultados precisam chegar ao catálogo global.
       throw persistentStorageError('As HQs foram encontradas, mas não foi possível salvá-las na biblioteca compartilhada.');
     }
+  }
+
+  if (isBlobConfigured()) {
+    const syncedAt = new Date().toISOString();
+    await Promise.allSettled(summaries.map((summary) => saveSourceSyncStatus({
+      ...summary,
+      syncedAt
+    })));
   }
 
   const successful = summaries.filter((item) => item.ok).length;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { getReadingState, markReadingStarted, saveReadingState } from '../services/libraryState.js';
+import { isComicOffline, offlineEvents, removeComicOffline, saveComicOffline } from '../services/offline.js';
 import PageControls from './PageControls.jsx';
 import PageViewer from './PageViewer.jsx';
 import ProgressBar from './ProgressBar.jsx';
@@ -15,12 +16,16 @@ export default function Reader({ comic, pages, documentUrl }) {
   const shellRef = useRef(null);
   const viewerRef = useRef(null);
   const skipInitialProgressWriteRef = useRef(true);
+  const sharedProgressTimerRef = useRef(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [zoom, setZoom] = useState(100);
   const [mode, setMode] = useState(() => localStorage.getItem('hq-reader:mode') || 'single');
   const [thumbnailsOpen, setThumbnailsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
   const [resumePage, setResumePage] = useState(null);
+  const [offline, setOffline] = useState(() => isComicOffline(comic.id));
+  const [offlineBusy, setOfflineBusy] = useState(false);
+  const [offlineLabel, setOfflineLabel] = useState('');
 
   const progressKey = `hq-reader:progress:${comic.id}`;
 
@@ -28,7 +33,8 @@ export default function Reader({ comic, pages, documentUrl }) {
     const reading = getReadingState(comic.id);
     const saved = Number(reading?.lastPage || localStorage.getItem(progressKey));
     if (Number.isInteger(saved) && saved > 1 && saved <= pages.length) setResumePage(saved);
-    markReadingStarted(comic.id, pages.length);
+    const started = markReadingStarted(comic.id, pages.length);
+    if (started) api.saveSharedReading(started).catch(() => {});
   }, [comic.id, pages.length, progressKey]);
 
   useEffect(() => {
@@ -36,16 +42,48 @@ export default function Reader({ comic, pages, documentUrl }) {
       skipInitialProgressWriteRef.current = false;
       return;
     }
-    saveReadingState(comic.id, {
+    const state = saveReadingState(comic.id, {
       lastPage: currentPage,
       totalPages: pages.length,
       completed: pages.length > 0 && currentPage >= pages.length
     });
+    if (state) {
+      if (sharedProgressTimerRef.current) window.clearTimeout(sharedProgressTimerRef.current);
+      sharedProgressTimerRef.current = window.setTimeout(() => {
+        api.saveSharedReading(state).catch(() => {
+          // O progresso já ficou enfileirado localmente e será reenviado depois.
+        });
+      }, 700);
+    }
   }, [comic.id, currentPage, pages.length]);
 
   useEffect(() => {
     localStorage.setItem('hq-reader:mode', mode);
   }, [mode]);
+
+  useEffect(() => {
+    const update = (event) => {
+      if (!event?.detail?.id || String(event.detail.id) === String(comic.id)) setOffline(isComicOffline(comic.id));
+    };
+    window.addEventListener(offlineEvents.updated, update);
+    return () => window.removeEventListener(offlineEvents.updated, update);
+  }, [comic.id]);
+
+  async function toggleOffline() {
+    if (offlineBusy) return;
+    setOfflineBusy(true);
+    setOfflineLabel('');
+    try {
+      if (offline) await removeComicOffline(comic.id);
+      else await saveComicOffline(comic, { onProgress: ({ done, total, label }) => setOfflineLabel(total > 1 ? `${done}/${total}` : (label || '')) });
+      setOffline(isComicOffline(comic.id));
+    } catch (error) {
+      window.alert(error?.message || 'Não foi possível alterar a disponibilidade offline desta HQ.');
+    } finally {
+      setOfflineBusy(false);
+      setOfflineLabel('');
+    }
+  }
 
   useEffect(() => {
     const handler = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -113,6 +151,10 @@ export default function Reader({ comic, pages, documentUrl }) {
         onModeChange={setMode}
         thumbnailsOpen={thumbnailsOpen}
         onToggleThumbnails={() => setThumbnailsOpen((value) => !value)}
+        offline={offline}
+        offlineBusy={offlineBusy}
+        offlineLabel={offlineLabel}
+        onToggleOffline={toggleOffline}
         onBack={() => navigate('/')}
       />
       <ProgressBar current={currentPage} total={pages.length} />

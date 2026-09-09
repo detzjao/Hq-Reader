@@ -1,7 +1,12 @@
 import {
+  AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
   FileUp,
+  FolderTree,
+  HardDrive,
   KeyRound,
   LibraryBig,
   Loader2,
@@ -20,6 +25,21 @@ const ACCEPTED_FILES = '.pdf,.cbz,.cbr,.jpg,.jpeg,.png,.webp,.gif';
 const ADMIN_PASSWORD = '@detzjao1';
 
 function ext(name = '') { return name.split('.').pop()?.toLowerCase() || ''; }
+
+function formatDateTime(value) {
+  if (!value) return 'Ainda não sincronizado';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Data indisponível';
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
+function sourceState(source) {
+  if (source?.ok === false) return { label: 'Erro', className: 'border-red-400/20 bg-red-500/10 text-red-300' };
+  if (source?.complete === false) return { label: 'Parcial', className: 'border-amber-400/20 bg-amber-500/10 text-amber-200' };
+  if (source?.lastSyncedAt) return { label: 'Sincronizado', className: 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' };
+  return { label: 'Pendente', className: 'border-white/10 bg-white/5 text-zinc-500' };
+}
+
 
 async function pdfCover(file) {
   if (ext(file.name) !== 'pdf') return null;
@@ -58,16 +78,33 @@ export default function LibraryManager() {
   const [removing, setRemoving] = useState('');
   const [refreshingDatabase, setRefreshingDatabase] = useState(false);
   const [adminToken, setAdminTokenState] = useState(() => getAdminToken());
+  const [libraryStatus, setLibraryStatus] = useState(null);
+  const [syncingSource, setSyncingSource] = useState('');
   const fileInputRef = useRef(null);
 
   async function refresh(fresh = false) {
     setLoading(true);
     setError('');
+    const [comicsResult, statusResult] = await Promise.allSettled([
+      api.getComics(fresh),
+      api.getLibraryStatus(fresh)
+    ]);
+    if (comicsResult.status === 'fulfilled') setComics(comicsResult.value.files || []);
+    else setError(comicsResult.reason?.message || 'Não foi possível carregar o catálogo.');
+    if (statusResult.status === 'fulfilled') setLibraryStatus(statusResult.value);
+    finallyRefresh();
+  }
+
+  function finallyRefresh() {
+    setLoading(false);
+  }
+
+  async function refreshStatus(fresh = false) {
     try {
-      const comicsResponse = await api.getComics(fresh);
-      setComics(comicsResponse.files || []);
-    } catch (err) { setError(err.message); }
-    finally { setLoading(false); }
+      const status = await api.getLibraryStatus(fresh);
+      setLibraryStatus(status);
+      return status;
+    } catch { return null; }
   }
 
   useEffect(() => { refresh(); }, []);
@@ -186,6 +223,7 @@ export default function LibraryManager() {
       const files = response.files || [];
       setComics(files);
       notifyUpdate();
+      await refreshStatus(true);
 
       const sourceText = (sync.sources || [])
         .filter((source) => source.ok)
@@ -201,6 +239,38 @@ export default function LibraryManager() {
       setRefreshingDatabase(false);
     }
   }
+
+  async function handleSyncSource(source) {
+    if (!source?.id || !canWrite() || syncingSource) return;
+    setSyncingSource(source.id);
+    setError('');
+    setMessage('');
+    try {
+      const sync = await api.syncLibrarySources({ sourceIds: [source.id] });
+      const response = await api.getComics(true);
+      setComics(response.files || []);
+      await refreshStatus(true);
+      notifyUpdate();
+      const summary = (sync.sources || []).find((item) => item.id === source.id) || (sync.sources || [])[0];
+      if (summary?.ok && summary?.complete !== false) {
+        setMessage(`${source.label || 'Drive'} sincronizado. Total da biblioteca: ${response.files?.length || 0} HQs.`);
+      } else {
+        setError(summary?.error || `A sincronização de ${source.label || 'Drive'} ficou parcial.`);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSyncingSource('');
+    }
+  }
+
+  const sourceStats = libraryStatus?.sourceStats || [];
+  const sourceTotals = sourceStats.reduce((acc, source) => {
+    acc.files += Number(source.files || 0);
+    acc.folders += Number(source.folders || 0);
+    acc.failedFolders += Number(source.failedFolders || 0);
+    return acc;
+  }, { files: 0, folders: 0, failedFolders: 0 });
 
   return (
     <div className="space-y-6">
@@ -235,6 +305,64 @@ export default function LibraryManager() {
             <RefreshCw className={`h-4 w-4 ${refreshingDatabase ? 'animate-spin' : ''}`} />
             {refreshingDatabase ? 'Procurando HQs...' : 'Atualizar base de dados'}
           </button>
+        </div>
+      </section>
+
+      <section className="border-t border-white/5 pt-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><HardDrive className="h-5 w-5" /></span>
+            <div>
+              <h3 className="text-lg font-bold text-white">Fontes / Drives</h3>
+              <p className="mt-0.5 text-sm text-zinc-500">Veja exatamente quantas HQs e pastas cada Drive está entregando.</p>
+            </div>
+          </div>
+          <span className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-bold text-zinc-400">{sourceStats.length} fontes</span>
+        </div>
+
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="rounded-xl border border-white/5 bg-black/20 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-zinc-600">HQs mapeadas</p><p className="mt-1 text-lg font-black text-white">{sourceTotals.files}</p></div>
+          <div className="rounded-xl border border-white/5 bg-black/20 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-zinc-600">Pastas lidas</p><p className="mt-1 text-lg font-black text-white">{sourceTotals.folders}</p></div>
+          <div className="rounded-xl border border-white/5 bg-black/20 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-zinc-600">Pastas com erro</p><p className={`mt-1 text-lg font-black ${sourceTotals.failedFolders ? 'text-red-400' : 'text-emerald-400'}`}>{sourceTotals.failedFolders}</p></div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {sourceStats.length ? sourceStats.map((source) => {
+            const state = sourceState(source);
+            const formats = source.formats || {};
+            return (
+              <div key={source.id} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="truncate text-sm font-bold text-zinc-100">{source.label || source.category || 'Google Drive'}</h4>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${state.className}`}>{state.label}</span>
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-zinc-600">{source.path || source.category || 'Sem coleção definida'}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {source.url && <a href={source.url} target="_blank" rel="noreferrer" className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-zinc-500 hover:text-white" title="Abrir Drive"><ExternalLink className="h-4 w-4" /></a>}
+                    <button type="button" onClick={() => handleSyncSource(source)} disabled={!canWrite() || Boolean(syncingSource) || refreshingDatabase} className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-[11px] font-bold text-zinc-300 hover:bg-white/10 disabled:opacity-40"><RefreshCw className={`h-3.5 w-3.5 ${syncingSource === source.id ? 'animate-spin' : ''}`} /> {syncingSource === source.id ? 'Sincronizando...' : 'Sincronizar'}</button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="rounded-xl border border-white/5 bg-white/[0.025] p-3"><p className="text-[10px] text-zinc-600">HQs</p><p className="mt-1 text-sm font-black text-zinc-200">{Number(source.files || 0)}</p></div>
+                  <div className="rounded-xl border border-white/5 bg-white/[0.025] p-3"><p className="flex items-center gap-1 text-[10px] text-zinc-600"><FolderTree className="h-3 w-3" /> Pastas</p><p className="mt-1 text-sm font-black text-zinc-200">{Number(source.folders || 0)}</p></div>
+                  <div className="rounded-xl border border-white/5 bg-white/[0.025] p-3"><p className="flex items-center gap-1 text-[10px] text-zinc-600">{Number(source.failedFolders || 0) ? <AlertTriangle className="h-3 w-3 text-red-400" /> : <CheckCircle2 className="h-3 w-3 text-emerald-400" />} Falhas</p><p className={`mt-1 text-sm font-black ${Number(source.failedFolders || 0) ? 'text-red-400' : 'text-emerald-400'}`}>{Number(source.failedFolders || 0)}</p></div>
+                  <div className="rounded-xl border border-white/5 bg-white/[0.025] p-3"><p className="text-[10px] text-zinc-600">Última sync</p><p className="mt-1 text-[11px] font-bold leading-4 text-zinc-300">{formatDateTime(source.lastSyncedAt)}</p></div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+                  <span className="rounded-md bg-white/5 px-2 py-1">PDF {Number(formats.pdf || 0)}</span>
+                  <span className="rounded-md bg-white/5 px-2 py-1">CBZ {Number(formats.cbz || 0)}</span>
+                  <span className="rounded-md bg-white/5 px-2 py-1">CBR {Number(formats.cbr || 0)}</span>
+                  <span className="rounded-md bg-white/5 px-2 py-1">Imagens {Number(formats.images || 0)}</span>
+                </div>
+                {source.lastError && <p className="mt-3 rounded-lg border border-red-500/15 bg-red-500/[0.06] px-3 py-2 text-[11px] leading-5 text-red-300">{source.lastError}</p>}
+              </div>
+            );
+          }) : <div className="rounded-xl border border-white/5 bg-black/20 px-4 py-5 text-xs text-zinc-600">Nenhuma fonte encontrada no catálogo.</div>}
         </div>
       </section>
 

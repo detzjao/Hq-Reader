@@ -10,6 +10,7 @@ import libraryDelete from '../server/handlers/library-delete.js';
 import libraryImport from '../server/handlers/library-import.js';
 import libraryUploadMeta from '../server/handlers/library-upload-meta.js';
 import library from '../server/handlers/library.js';
+import userState from '../server/handlers/user-state.js';
 
 export const config = { maxDuration: 300 };
 
@@ -25,7 +26,8 @@ const ROUTES = new Map([
   ['library-delete', libraryDelete],
   ['library-import', libraryImport],
   ['library-upload-meta', libraryUploadMeta],
-  ['library', library]
+  ['library', library],
+  ['user-state', userState]
 ]);
 
 export default async function handler(req, res) {

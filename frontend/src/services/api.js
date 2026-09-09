@@ -1,4 +1,14 @@
 import { upload } from '@vercel/blob/client';
+import {
+  acknowledgePendingSharedChanges,
+  applySharedState,
+  buildSharedStateMigration,
+  getPendingSharedChanges,
+  markSharedStateMigrated,
+  queueFavoriteChange,
+  queueReadingChange,
+  sharedStateNeedsMigration
+} from './libraryState.js';
 
 const ADMIN_STORAGE_KEY = 'hq-reader:admin-token';
 const LEGACY_DISCOVERED_STORAGE_KEY = 'hq-reader:drive-sync-files';
@@ -207,7 +217,7 @@ async function getComic(id) {
   return request(`/api/comic?id=${encodeURIComponent(id)}`);
 }
 
-async function syncLibrarySources({ onProgress } = {}) {
+async function syncLibrarySources({ onProgress, sourceIds = [] } = {}) {
   let status = { sources: [] };
   try { status = await request('/api/library', { timeout: 30_000 }); } catch {}
 
@@ -220,7 +230,8 @@ async function syncLibrarySources({ onProgress } = {}) {
   const sourceById = new Map();
   for (const source of status.sources || []) if (source?.id) sourceById.set(source.id, source);
   splitLegacyMarvelExtraSource(sourceById);
-  const sources = [...sourceById.values()];
+  const requestedSourceIds = new Set((Array.isArray(sourceIds) ? sourceIds : []).map((id) => String(id || '').trim()).filter(Boolean));
+  const sources = [...sourceById.values()].filter((source) => !requestedSourceIds.size || requestedSourceIds.has(source.id));
 
   if (!sources.length) {
     return request('/api/library', {
@@ -337,6 +348,79 @@ async function syncLibrarySources({ onProgress } = {}) {
   };
 }
 
+
+async function getSharedUserState(fresh = false) {
+  return request(`/api/user-state${fresh ? `?fresh=${Date.now()}` : ''}`, { timeout: 30_000 });
+}
+
+async function mergeSharedUserState(payload) {
+  return request('/api/user-state', {
+    method: 'POST',
+    timeout: 30_000,
+    body: JSON.stringify({ action: 'merge', favorites: payload?.favorites || [], reading: payload?.reading || [] })
+  });
+}
+
+async function syncSharedUserState() {
+  // Primeira versão compartilhada: migra favoritos/progresso que já estavam
+  // salvos somente neste navegador sem apagá-los antes da confirmação remota.
+  if (sharedStateNeedsMigration()) {
+    const migration = buildSharedStateMigration();
+    if (migration.favorites.length || migration.reading.length) {
+      const result = await mergeSharedUserState(migration);
+      if (result?.state) applySharedState(result.state);
+    }
+    markSharedStateMigrated();
+  }
+
+  const pending = getPendingSharedChanges();
+  if (pending.favorites.length || pending.reading.length) {
+    const result = await mergeSharedUserState(pending);
+    if (result?.state) applySharedState(result.state);
+    acknowledgePendingSharedChanges(pending);
+  }
+
+  const remote = await getSharedUserState(true);
+  applySharedState(remote);
+  return remote;
+}
+
+async function setSharedFavorite(id, favorite) {
+  const op = queueFavoriteChange(id, favorite);
+  if (!op) return null;
+  try {
+    const result = await request('/api/user-state', {
+      method: 'POST',
+      timeout: 30_000,
+      body: JSON.stringify({ action: 'favorite', ...op })
+    });
+    acknowledgePendingSharedChanges({ favorites: [op], reading: [] });
+    if (result?.state) applySharedState(result.state);
+    return result?.state || null;
+  } catch (error) {
+    // A alteração fica na fila local e será reenviada quando voltar a ficar online.
+    throw error;
+  }
+}
+
+async function saveSharedReading(state) {
+  const op = queueReadingChange(state);
+  if (!op) return null;
+  try {
+    const result = await request('/api/user-state', {
+      method: 'POST',
+      timeout: 30_000,
+      body: JSON.stringify({ action: 'reading', ...op }),
+      keepalive: true
+    });
+    acknowledgePendingSharedChanges({ favorites: [], reading: [op] });
+    if (result?.state) applySharedState(result.state);
+    return result?.state || null;
+  } catch (error) {
+    throw error;
+  }
+}
+
 async function addToLibrary({ url, name, path }) {
   const result = await request('/api/library-add', {
     method: 'POST',
@@ -355,8 +439,12 @@ export const api = {
   getComics,
   getComic,
   syncLibrarySources,
+  getSharedUserState,
+  syncSharedUserState,
+  setSharedFavorite,
+  saveSharedReading,
   getArchivePages: (id) => request(`/api/archive?id=${encodeURIComponent(id)}`, { timeout: 120_000 }),
-  getLibraryStatus: () => request('/api/library'),
+  getLibraryStatus: (fresh = false) => request(`/api/library${fresh ? `?fresh=${Date.now()}` : ''}`),
   addToLibrary,
   importLibrary: (text) => request('/api/library-import', { method: 'POST', admin: true, body: JSON.stringify({ text }), timeout: 60_000 }),
   registerUpload: ({ blob, originalName, size, path, thumbnailUrl }) => request('/api/library-upload-meta', { method: 'POST', admin: true, body: JSON.stringify({ blob, originalName, size, path, thumbnailUrl }) }),

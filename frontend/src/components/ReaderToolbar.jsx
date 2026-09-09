@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Download, Expand, List, Minus, PanelLeft, Plus, Shrink } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCircle2, CloudDownload, Download, Expand, List, Loader2, Minus, PanelLeft, Plus, Shrink } from 'lucide-react';
 
 export default function ReaderToolbar({
   title,
@@ -13,6 +13,10 @@ export default function ReaderToolbar({
   onModeChange,
   thumbnailsOpen,
   onToggleThumbnails,
+  offline,
+  offlineBusy,
+  offlineLabel,
+  onToggleOffline,
   onBack
 }) {
   return (
@@ -29,6 +33,9 @@ export default function ReaderToolbar({
         <a href={downloadUrl} download className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-white" aria-label="Baixar HQ" title="Baixar HQ">
           <Download className="h-5 w-5" />
         </a>
+        <button onClick={onToggleOffline} disabled={offlineBusy} className={`rounded-lg p-2 ${offline ? 'bg-sky-500/15 text-sky-300' : 'text-zinc-400 hover:bg-white/5 hover:text-white'} disabled:cursor-wait`} aria-label={offline ? 'Remover HQ do offline' : 'Salvar HQ offline'} title={offlineBusy ? (offlineLabel || 'Salvando offline…') : (offline ? 'Disponível offline' : 'Salvar offline')}>
+          {offlineBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : offline ? <CheckCircle2 className="h-5 w-5" /> : <CloudDownload className="h-5 w-5" />}
+        </button>
         <button onClick={onToggleThumbnails} className={`rounded-lg p-2 ${thumbnailsOpen ? 'bg-red-500/20 text-red-400' : 'text-zinc-400 hover:bg-white/5 hover:text-white'}`} aria-label="Abrir miniaturas">
           <PanelLeft className="h-5 w-5" />
         </button>

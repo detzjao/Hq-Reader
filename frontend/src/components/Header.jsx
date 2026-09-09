@@ -1,18 +1,41 @@
-import { BookOpen, LibraryBig, Menu, Search, Settings, SlidersHorizontal, X } from 'lucide-react';
+import { BookOpen, CheckCircle2, Download, LibraryBig, Menu, Search, Settings, SlidersHorizontal, Smartphone, WifiOff, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import LibraryManager from './LibraryManager.jsx';
+import { canPromptInstall, isIOS, isStandalone, promptInstall, pwaEvents } from '../services/pwa.js';
 
 export default function Header({ onFocusSearch }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('reading');
   const [defaultMode, setDefaultMode] = useState(() => localStorage.getItem('hq-reader:mode') || 'single');
+  const [installReady, setInstallReady] = useState(() => canPromptInstall());
+  const [installed, setInstalled] = useState(() => isStandalone());
 
   useEffect(() => {
     localStorage.setItem('hq-reader:mode', defaultMode);
   }, [defaultMode]);
+
+
+  useEffect(() => {
+    const updateInstall = () => {
+      setInstallReady(canPromptInstall());
+      setInstalled(isStandalone());
+    };
+    window.addEventListener(pwaEvents.install, updateInstall);
+    window.matchMedia?.('(display-mode: standalone)')?.addEventListener?.('change', updateInstall);
+    return () => {
+      window.removeEventListener(pwaEvents.install, updateInstall);
+      window.matchMedia?.('(display-mode: standalone)')?.removeEventListener?.('change', updateInstall);
+    };
+  }, []);
+
+  async function installApp() {
+    await promptInstall();
+    setInstallReady(canPromptInstall());
+    setInstalled(isStandalone());
+  }
 
   useEffect(() => {
     if (!settingsOpen) return undefined;
@@ -84,6 +107,31 @@ export default function Header({ onFocusSearch }) {
                 <button onClick={() => setDefaultMode('vertical')} className={`rounded-xl border px-4 py-3 text-sm font-semibold ${defaultMode === 'vertical' ? 'border-red-500/60 bg-red-500/10 text-red-300' : 'border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10'}`}>
                   Rolagem vertical
                 </button>
+              </div>
+
+              <div className="mt-7 border-t border-white/5 pt-6">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/10 text-red-400"><Smartphone className="h-5 w-5" /></span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-base font-bold text-white">Aplicativo e leitura offline</h3>
+                    <p className="mt-1 text-sm leading-6 text-zinc-400">Instale o HQ Reader como aplicativo. Nas capas, use o botão de nuvem para guardar uma HQ inteira neste dispositivo.</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                  {installed ? (
+                    <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300"><CheckCircle2 className="h-4 w-4" /> HQ Reader instalado neste dispositivo.</div>
+                  ) : installReady ? (
+                    <button type="button" onClick={installApp} className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:bg-red-500">
+                      <Download className="h-4 w-4" /> Instalar HQ Reader
+                    </button>
+                  ) : isIOS() ? (
+                    <p className="text-sm leading-6 text-zinc-300">No iPhone/iPad: toque em <span className="font-bold text-white">Compartilhar</span> e depois em <span className="font-bold text-white">Adicionar à Tela de Início</span>.</p>
+                  ) : (
+                    <p className="text-sm leading-6 text-zinc-400">Quando o navegador liberar a instalação, o botão aparecerá aqui. Também é possível usar a opção “Instalar aplicativo” no menu do navegador.</p>
+                  )}
+                  <div className="mt-3 flex items-start gap-2 text-xs leading-5 text-zinc-500"><WifiOff className="mt-0.5 h-4 w-4 shrink-0" /> HQs marcadas como offline continuam abrindo mesmo sem internet depois que o aplicativo tiver sido carregado pelo menos uma vez.</div>
+                </div>
               </div>
             </div>
           ) : <LibraryManager />}

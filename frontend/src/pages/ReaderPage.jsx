@@ -16,6 +16,7 @@ export default function ReaderPage() {
   async function load() {
     setLoading(true); setError(null);
     try {
+      await api.syncSharedUserState().catch(() => null);
       const response = await api.getComic(id);
       const comic = response.comic;
       let pages = [];
