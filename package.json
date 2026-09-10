@@ -1,6 +1,6 @@
 {
   "name": "hq-reader-vercel",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -18,11 +18,11 @@
     "doctor:api": "node scripts/doctor-api.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.57.0",
     "@vercel/blob": "^2.8.0",
     "adm-zip": "^0.5.16",
-    "dotenv": "^16.4.7",
-    "node-unrar-js": "^2.0.2"
+    "node-unrar-js": "^2.0.2",
+    "@supabase/supabase-js": "^2.57.0",
+    "dotenv": "^16.4.7"
   },
   "allowScripts": {
     "esbuild@0.25.12": true

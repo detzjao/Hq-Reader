@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle2, Download, Heart, HardDrive, Loader2 } from 'lucide-react';
+import { BookOpen, CheckCircle2, Download, Heart, Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Header from '../components/Header.jsx';
@@ -39,7 +39,7 @@ export default function ComicDetails() {
         const info = seriesForComic(item);
         setRelated(all.filter((candidate) => candidate.id !== item.id && seriesForComic(candidate).key === info.key).sort((a, b) => new Intl.Collator('pt-BR', { numeric: true, sensitivity: 'base' }).compare(a.name, b.name)).slice(0, 18));
       }
-    } catch (e) { setError(e?.message || 'Não foi possível abrir esta HQ.'); }
+    } catch (e) { setError(local ? 'Não foi possível abrir esta HQ agora. Tente novamente em instantes.' : (e?.message || 'Não foi possível abrir esta HQ.')); }
     finally { setLoading(false); }
   }
 
@@ -66,7 +66,7 @@ export default function ComicDetails() {
   async function queueLocal() {
     setBusy(true);
     try { await localBridge.queueDownload(id); await load(); }
-    catch (e) { setError(e?.message || 'Não foi possível iniciar o download.'); }
+    catch { setError('Não foi possível preparar esta HQ agora. Tente novamente em instantes.'); }
     finally { setBusy(false); }
   }
 
@@ -88,16 +88,16 @@ export default function ComicDetails() {
               <div className="comic-panel aspect-[2/3] overflow-hidden rounded-2xl bg-[var(--panel)]">{cover ? <img src={cover} alt={`Capa de ${title}`} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-[var(--muted)]"><BookOpen className="h-20 w-20 opacity-30" /></div>}</div>
             </div>
             <div className="self-center">
-              <div className="flex flex-wrap gap-2"><span className={`hq-badge ${local ? 'text-[#ffd60a]' : 'text-[#00d4ff]'}`}>{local ? 'Telegram local' : 'Google Drive'}</span><span className="hq-badge">{String(comic.extension || comic.format || '').toUpperCase()}</span>{reading?.completed && <span className="hq-badge text-emerald-500"><CheckCircle2 className="h-3 w-3" /> Lida</span>}</div>
+              <div className="flex flex-wrap gap-2"><span className="hq-badge">{String(comic.extension || comic.format || '').toUpperCase()}</span>{reading?.completed && <span className="hq-badge text-emerald-500"><CheckCircle2 className="h-3 w-3" /> Lida</span>}</div>
               <h1 className="mt-4 font-display text-5xl font-black uppercase leading-[.95] tracking-wide sm:text-6xl">{title}</h1>
-              <p className="mt-3 text-sm font-semibold text-[var(--muted)]">{comic.path || comic.category || 'Sem coleção'}</p>
+              <p className="mt-3 text-sm font-semibold text-[var(--muted)]">{local ? 'Acervo digital' : (comic.path || comic.category || 'Sem coleção')}</p>
               <div className="mt-6 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><Meta label="Editora" value={comic.publisher || comic.category} /><Meta label="Autor" value={comic.author || 'Não informado'} /><Meta label="Desenhista" value={comic.artist || 'Não informado'} /><Meta label="Ano" value={comic.year || 'Não informado'} /></div>
-              <p className="mt-6 max-w-3xl text-sm leading-7 text-[var(--muted)]">{comic.synopsis || 'Sinopse ainda não cadastrada. Esta edição foi indexada a partir da fonte original e pode receber metadados complementares posteriormente.'}</p>
+              <p className="mt-6 max-w-3xl text-sm leading-7 text-[var(--muted)]">{comic.synopsis || 'Sinopse ainda não cadastrada. Metadados complementares desta edição poderão ser adicionados posteriormente.'}</p>
               <div className="mt-7 flex flex-wrap gap-3">
-                {canRead ? <Link to={`/reader/${encodeURIComponent(id)}`} className="inline-flex items-center gap-2 rounded-xl bg-[#ef233c] px-5 py-3 text-sm font-black text-white shadow-[4px_4px_0_#ffd60a]"><BookOpen className="h-4 w-4" /> {reading?.started && !reading?.completed ? 'Continuar lendo' : 'Iniciar leitura'}</Link> : <button onClick={queueLocal} disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-[#ffd60a] px-5 py-3 text-sm font-black text-black disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Baixar para o HD</button>}
+                {canRead ? <Link to={`/reader/${encodeURIComponent(id)}`} className="inline-flex items-center gap-2 rounded-xl bg-[#ef233c] px-5 py-3 text-sm font-black text-white shadow-[4px_4px_0_#ffd60a]"><BookOpen className="h-4 w-4" /> {reading?.started && !reading?.completed ? 'Continuar lendo' : 'Iniciar leitura'}</Link> : <button onClick={queueLocal} disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-[#ffd60a] px-5 py-3 text-sm font-black text-black disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Baixar para leitura</button>}
                 <button onClick={favoriteToggle} className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-black ${favorite ? 'border-[#ef233c] bg-[#ef233c]/10 text-[#ef233c]' : 'border-[var(--line)] bg-[var(--panel)]'}`}><Heart className={`h-4 w-4 ${favorite ? 'fill-current' : ''}`} /> {favorite ? 'Favoritada' : 'Favoritar'}</button>
                 <button onClick={markRead} className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm font-black"><CheckCircle2 className="h-4 w-4" /> Marcar como lida</button>
-                {local && <span className="inline-flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm font-bold text-[var(--muted)]"><HardDrive className="h-4 w-4" /> {fmt(comic.size)}</span>}
+                {local && Number(comic.size) > 0 && <span className="inline-flex items-center rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm font-bold text-[var(--muted)]">{fmt(comic.size)}</span>}
               </div>
               {error && <div className="mt-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-500">{error}</div>}
             </div>

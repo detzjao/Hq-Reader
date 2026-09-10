@@ -20,7 +20,7 @@ export default function ReaderPage() {
     try {
       if (!local) await api.syncSharedUserState().catch(() => null);
       const comic = local ? await localBridge.getComic(id) : (await api.getComic(id)).comic;
-      if (local && (!comic.available || comic.localStatus !== 'local')) throw new Error('Esta HQ ainda não está disponível em um HD conectado. Baixe-a pela Biblioteca.');
+      if (local && (!comic.available || comic.localStatus !== 'local')) throw new Error('Esta HQ ainda não está disponível para leitura. Baixe-a pela Biblioteca e tente novamente.');
       let pages = [];
       let documentUrl = null;
       if (comic.format === 'pdf') {
@@ -34,7 +34,7 @@ export default function ReaderPage() {
         pages = archive.pages || [];
       }
       setData({ comic, pages, documentUrl });
-    } catch (err) { setError(err); }
+    } catch (err) { setError(local ? new Error('Não foi possível preparar esta HQ para leitura agora. Tente novamente em instantes.') : err); }
     finally { setLoading(false); }
   }
 
