@@ -1,266 +1,140 @@
-# HQ Reader — Vercel All-in-One
+# HQ Reader 3.2.0 — Biblioteca unificada
 
-Versão do HQ Reader preparada para rodar inteira no **Vercel**, sem Render e sem backend separado.
+Esta versão parte do HQ Reader 2.4.2 e corrige a arquitetura das versões 3.1.x.
 
-## Arquitetura
+## Mudanças principais
 
-- Frontend: React + Vite + Tailwind
-- API: Vercel Functions em `/api`
-- Catálogo inicial: `data/initial-library.json`
-- Uploads persistentes: Vercel Blob
-- Metadados adicionados/removidos: Vercel Blob
-- PDF: renderizado no navegador com PDF.js
-- CBZ/CBR: extraído sob demanda e as páginas ficam em cache no Vercel Blob
-- Google Drive: arquivos públicos continuam sendo a origem das HQs já catalogadas
+- Biblioteca inicial única em `/`.
+- Google Drive continua como base principal.
+- Telegram/HDs foi integrado à Biblioteca; não existe mais tela de usuário separada `/local`.
+- URL/token do Worker local ficam somente em `Admin > Telegram / HDs`.
+- Login e cadastro usam Supabase Auth.
+- `profiles.role` separa `user` e `admin`.
+- Painel `/admin` protegido por papel `admin`.
+- `/api/comics` não derruba mais a Biblioteca por falha opcional do Supabase.
+- Catálogo Drive usa seed + catálogo sincronizado + Supabase, com fallback local.
+- Varredura completa dos cinco Drives usa Google Drive API v3, paginação de 1000 itens, recursão em subpastas, atalhos e retries.
+- Novos arquivos descobertos ficam disponíveis também para `/api/content`, `/api/download` e CBZ/CBR; não apenas na listagem.
+- Estado de leitura/favoritos é separado por usuário e pode ser persistido com RLS, sem exigir service-role para cada operação.
+- Nova página `/comic/:id` antes do leitor, com hero, capa, metadados, CTAs e outras edições da coleção.
+- Redesign Pop Art/Spider-Verse sutil, dark/light, halftone, hard shadows, cards 2:3 e progressos.
 
-O catálogo inicial contém **698 HQs**:
+## 1. Supabase — configuração recomendada
 
-- Marvel: 512
-- DC Comics: 87
-- Turma da Mônica: 99
+No SQL Editor do mesmo projeto Supabase do HQ Reader, execute o arquivo único:
 
-## Publicar no Vercel
+`supabase/HQ_READER_SETUP_3_2.sql`
 
-### 1. Suba este projeto
+Ele reúne as migrations 001 a 005 em ordem e é idempotente para a instalação esperada.
 
-Importe o repositório/pasta no Vercel normalmente. Não configure Render e não defina `VITE_API_BASE_URL`.
+Depois crie sua conta pela tela `/login` e transforme a primeira conta em admin uma única vez:
 
-A aplicação usa apenas rotas do mesmo domínio:
-
-```text
-/api/comics
-/api/comic
-/api/content
-/api/download
-/api/library
-/api/blob-upload
+```sql
+update public.profiles
+set role = 'admin', updated_at = now()
+where email = 'SEU_EMAIL';
 ```
 
-### 2. Conecte Vercel Blob
+Saia e entre novamente.
 
-No projeto Vercel:
+## 2. `.env`
 
-1. Abra **Storage**.
-2. Crie/conecte um **Blob Store**.
-3. Use acesso **Public** para os arquivos da biblioteca.
-4. O Vercel adicionará `BLOB_READ_WRITE_TOKEN` ao projeto automaticamente.
+Copie:
 
-O catálogo inicial carrega mesmo sem Blob. O Blob é necessário para:
-
-- upload de PDF/CBZ/CBR/imagens;
-- adicionar links de forma persistente;
-- excluir HQs do catálogo;
-- cachear páginas extraídas de CBZ/CBR.
-
-### 3. Crie a senha de administração
-
-Em **Settings → Environment Variables**, adicione:
-
-```text
-HQ_READER_ADMIN_TOKEN=uma-senha-forte-escolhida-por-voce
+```bat
+copy .env.example .env
 ```
 
-Depois faça um **Redeploy**.
+Preencha as variáveis públicas e server-side do Supabase. A chave `SUPABASE_SERVICE_ROLE_KEY`/`SUPABASE_SECRET_KEY` nunca deve receber prefixo `VITE_`.
 
-Na aplicação, abra:
+A v3.2.0 final não contém URL/chave de nenhum projeto Supabase embutida. Se alguma variável estiver ausente, o login mostra a configuração faltante em vez de tentar acessar outro projeto silenciosamente.
 
-**Configurações → Biblioteca → Administração**
+Para a varredura completa das pastas públicas do Google Drive, habilite a Google Drive API no Google Cloud e adicione no backend:
 
-Digite a mesma senha. Ela fica salva somente naquele navegador e é enviada apenas para as rotas de escrita da própria aplicação.
+```env
+GOOGLE_DRIVE_API_KEY=SUA_API_KEY
+```
 
-## Otimizações desta versão
+A chave não precisa de OAuth para listar fontes públicas. Restrinja a key à Google Drive API no Google Cloud.
 
-### Biblioteca
+## 3. Rodar localmente
 
-A tela não renderiza mais centenas de cards de uma só vez. Ela começa com 36 HQs e adiciona novos lotes conforme a rolagem se aproxima do final.
+Na raiz:
 
-As capas dos arquivos do Google Drive usam thumbnails diretamente do Drive, evitando baixar o PDF inteiro só para mostrar a capa.
-
-### PDF
-
-O servidor não converte cada página em imagem. O PDF.js renderiza diretamente no navegador e solicita apenas os trechos necessários do arquivo.
-
-### Uploads grandes
-
-Os arquivos não passam pelo corpo de uma Vercel Function. O navegador envia diretamente para Vercel Blob através do fluxo de Client Upload, inclusive com multipart para arquivos maiores.
-
-### Download
-
-- HQ no Vercel Blob: redireciona para o arquivo no Blob/CDN.
-- HQ do Google Drive: redireciona para a origem pública do Drive.
-
-Assim a Function não precisa transportar o arquivo inteiro para o download.
-
-### CBZ e CBR
-
-Na primeira abertura, o arquivo é processado e as páginas são armazenadas no Blob. Nas próximas leituras, as páginas vêm diretamente do CDN.
-
-## Desenvolvimento local
-
-Instale:
-
-```bash
+```bat
 npm install
+start-local.bat
 ```
 
-Se já tiver conectado Blob ao projeto Vercel:
+ou:
 
-```bash
-npx vercel env pull .env.local
-```
-
-Depois:
-
-```bash
+```bat
 npm run dev
 ```
 
-O comando usa `vercel dev`, permitindo testar o frontend e as Functions no mesmo endereço.
+O comando sobe os dois processos:
 
-## Variáveis opcionais
+- Frontend: `http://localhost:5173`
+- API: `http://127.0.0.1:8788`
 
-```text
-MAX_UPLOAD_BYTES=524288000
-MAX_ARCHIVE_BYTES=314572800
-MAX_ARCHIVE_PAGES=1200
-CATALOG_CACHE_MS=20000
+O Vite encaminha `/api/*` para a API local. Não rode apenas o Vite dentro de `frontend/`.
+
+## 4. Buscar TUDO dos Drives
+
+Entre como Admin e abra:
+
+`Admin > Google Drive`
+
+O seed de 698 HQs serve apenas como fallback inicial. Clique em **Sincronizar todos** para percorrer as cinco fontes completas.
+
+A sincronização:
+
+1. lista todas as páginas de cada pasta;
+2. percorre subpastas recursivamente;
+3. resolve atalhos para pasta/arquivo;
+4. repete pastas que falharem até três vezes;
+5. continua em vários lotes até a fila zerar;
+6. salva os novos itens no catálogo runtime local e, quando a chave server-side estiver configurada, também no Supabase.
+
+Em produção/Vercel, configure a chave server-side do Supabase para que o catálogo sincronizado seja persistente entre execuções serverless.
+
+## 5. Telegram + HDs
+
+O usuário não configura token nenhum.
+
+Somente o Admin acessa:
+
+`Admin > Telegram / HDs`
+
+Ali ficam:
+
+- URL do Worker v3;
+- token local;
+- teste de conexão;
+- estado dos volumes/HDs;
+- quantidade catalogada.
+
+Depois de configurado, o catálogo Telegram aparece na mesma Biblioteca junto do Drive. Arquivos ainda remotos podem ser colocados na fila de download sob demanda.
+
+## 6. Diagnóstico de API
+
+Com `npm run dev` aberto, execute em outro terminal:
+
+```bat
+api-diagnostics.bat
 ```
 
-## Estrutura principal
+Ele testa `/api/diagnostics`, `/api/comics` e `/api/library` e imprime corpo/status de cada rota. O objetivo é evitar o antigo “Erro HTTP 500” sem contexto.
 
-```text
-hq-reader/
-├── api/                    # Vercel Functions
-├── data/
-│   └── initial-library.json
-├── server/                 # serviços compartilhados pelas Functions
-├── frontend/               # React + Vite
-├── vercel.json
-├── package.json
-└── README.md
-```
+## 7. Vercel
 
-## Observação sobre o Google Drive
+Foram incluídas rewrites para:
 
-As HQs já catalogadas continuam usando seus arquivos públicos do Drive como origem. Nenhuma API Key do Google é necessária. Novos arquivos podem ser adicionados por link individual ou enviados diretamente para o Vercel Blob.
+- `/api/drive-sync`
+- `/api/diagnostics`
+- `/comic/*`
+- `/reader/*`
+- `/admin`
+- `/login`
 
-## Vercel / npm 11 — esbuild
-
-O projeto aprova explicitamente o script de instalação do `esbuild@0.25.12` no `package.json` por meio de `allowScripts`. Isso evita que builds com npm 11 parem ou emitam pendência de aprovação antes do `vite build`.
-
-
-## Correção iOS Safari (2.0.3)
-
-- PDF.js passa a usar o build `legacy` para maior compatibilidade com Safari/iOS.
-- Polyfill de `Promise.withResolvers` antes do carregamento do PDF.js.
-- No Safari iOS, o leitor desativa streaming contínuo e prioriza requisições HTTP Range.
-- Timeout de abertura evita spinner infinito.
-- Canvas limita o DPR em iPhone/iPad para reduzir uso de memória em telas Retina.
-
-
-## Administração
-
-A interface exibe somente o acesso administrativo, sem os painéis técnicos de armazenamento. A senha administrativa fixa desta versão é `@detzjao1`.
-
-## Navegação e zoom livre (2.0.4)
-
-- Pinça com dois dedos amplia exatamente a região tocada, sem recentralizar a página.
-- Com zoom acima de 100%, arraste com um dedo no celular ou com o mouse no desktop para mover pela página.
-- Duplo toque/duplo clique alterna entre 100% e 200% usando o ponto tocado como foco.
-- `Ctrl/Cmd + roda do mouse/trackpad` aplica zoom no ponto do cursor.
-- Os botões `+` e `-` preservam o centro atual da leitura; tocar no percentual restaura 100%.
-- Ao trocar de página com zoom aplicado, a nova página abre no topo e centralizada horizontalmente.
-- No iPhone/iPad o leitor usa `100dvh` para se adaptar melhor às barras dinâmicas do Safari.
-
-## Atualização das pastas do Drive (v2.0.6)
-
-O botão **Atualizar base de dados** agora executa uma nova varredura das três fontes configuradas (Marvel, DC Comics e Turma da Mônica), percorre subpastas públicas, tenta resolver atalhos e adiciona ao catálogo em uso as HQs públicas encontradas que ainda não estavam na base inicial. A varredura só acontece quando o botão é acionado.
-
-Quando houver armazenamento persistente configurado no deploy, o resultado também é salvo como snapshot do catálogo. Sem armazenamento persistente, o resultado da varredura fica salvo no navegador e continua disponível naquele dispositivo, inclusive para abrir PDFs encontrados na nova busca.
-
-
-## Fontes padrão
-
-O botão **Atualizar base de dados** varre estas fontes públicas do Google Drive:
-
-- Marvel Comics
-- Marvel Comics Extra — `1wE5ePfzZkIHa-RADBEpkB_FWAJowI2K6`
-- DC Comics
-- Turma da Mônica
-
-A nova fonte Marvel Extra contém, na raiz, as pastas **MARVEL INDIVIDUAL** e **MARVEL DRIVE**.
-
-## Sincronização automática dos Drives (v2.1.0)
-
-- Ao abrir a biblioteca, o frontend carrega o catálogo existente imediatamente e inicia em segundo plano uma varredura de todas as fontes públicas configuradas.
-- A varredura automática percorre subpastas e reúne PDF, CBZ, CBR e imagens suportadas sem exigir que o usuário clique primeiro em “Atualizar base de dados”.
-- As quatro fontes padrão continuam sendo Marvel Comics, Marvel Comics Extra, DC Comics e Turma da Mônica.
-- A tela “Adicionar por link” agora aceita tanto um arquivo individual quanto o link de uma pasta inteira do Google Drive.
-- Ao adicionar uma pasta, ela é percorrida recursivamente e as HQs encontradas entram na biblioteca. A pasta também fica registrada no navegador para novas varreduras automáticas.
-- Quando o deploy possui armazenamento persistente, novas fontes adicionadas pelo administrador também são registradas no catálogo do servidor.
-- A aplicação continua exibindo o catálogo já disponível caso alguma pasta pública esteja temporariamente indisponível durante a sincronização automática.
-
-
-
-## Varredura completa de grandes Drives (v2.1.1)
-
-- O Drive Marvel Extra agora usa um mapa de bootstrap com **221 pastas conhecidas** logo abaixo de `MARVEL DRIVE` e `MARVEL INDIVIDUAL`, evitando depender apenas da listagem HTML parcial do Google Drive.
-- A sincronização automática roda **uma fonte por requisição**, dando a cada Drive sua própria janela de execução e salvando os resultados progressivamente no navegador.
-- A página inicial atualiza a contagem de HQs conforme cada fonte termina, em vez de esperar todas as pastas concluírem.
-- Se uma fonte falhar, a sincronização não é marcada como concluída e será tentada novamente na próxima abertura.
-
-## 2.1.2 — detecção de HQs sem extensão no Google Drive
-
-A varredura de pastas públicas não depende mais de o nome visível terminar em `.pdf`, `.cbz`, `.cbr` ou extensão de imagem. Quando o Drive mostra um arquivo sem extensão, o servidor inspeciona o MIME e os primeiros bytes do arquivo e normaliza o formato antes de adicioná-lo ao catálogo.
-
-Também foi ampliado o parser do `embeddedfolderview`: além do bloco visual `flip-entry-title`, ele percorre todos os links de arquivo e subpasta presentes no HTML, no mesmo princípio usado por crawlers públicos modernos do Google Drive. Isso melhora principalmente coleções profundas, como o Marvel Comics Extra.
-
-## 2.1.4 — biblioteca compartilhada entre dispositivos
-
-Drives adicionados pela tela administrativa passam a ser registrados no catálogo persistente do servidor antes de serem considerados adicionados. A lista de fontes deixa de depender do `localStorage` do navegador, então computador, celular e outros dispositivos carregam a mesma biblioteca. Versões antigas que tenham fontes presas ao navegador são migradas automaticamente quando o administrador autenticado executa uma sincronização.
-
-
-## Persistência compartilhada (2.1.6)
-
-A biblioteca dinâmica usa Vercel Blob. A versão 2.1.6 reconhece tanto a conexão atual via OIDC (`BLOB_STORE_ID`) quanto lojas legadas com `BLOB_READ_WRITE_TOKEN`. Em deployments atuais da Vercel, conectar um Blob Store ao projeto é suficiente para o SDK autenticar operações de servidor via OIDC.
-
-
-## Biblioteca e acompanhamento (v2.2.0)
-
-- Nova aba **Continuar lendo**, ordenada pela leitura mais recente.
-- Cards exibem barra e percentual de progresso antes de abrir a HQ.
-- A home agora pode alternar entre **Séries** e **HQs**.
-- Séries usam a hierarquia real das pastas do Drive e abrem uma grade somente com as edições daquela coleção.
-- Pastas bootstrap do Marvel Drive/Marvel Individual passam a recuperar o nome real da pasta durante a varredura, melhorando a organização por série.
-- Administração ganhou o painel **Fontes / Drives**, com HQs por fonte, pastas percorridas, falhas, formatos e última sincronização.
-- Cada Drive pode ser sincronizado individualmente pelo painel.
-- O backend persiste o diagnóstico da última sincronização de cada fonte quando o armazenamento compartilhado está disponível.
-
-## v2.3.0 — Favoritos/progresso compartilhados + PWA + offline
-
-Esta versão transforma o estado de leitura em um perfil compartilhado do próprio deployment:
-
-- favoritos são persistidos no armazenamento compartilhado e aparecem nos demais dispositivos;
-- página atual, total de páginas, status concluído e datas de leitura são sincronizados;
-- dados locais das versões anteriores são migrados sem serem apagados antes da confirmação do servidor;
-- mudanças feitas sem internet entram em uma fila local e são reenviadas ao voltar a ficar online;
-- ao voltar para a aba ou focar o site, o estado compartilhado é atualizado novamente.
-
-### PWA
-
-O frontend inclui `manifest.webmanifest`, Service Worker e ícones próprios. Em navegadores compatíveis, o HQ Reader pode ser instalado como aplicativo. No iOS, use Compartilhar → Adicionar à Tela de Início.
-
-### HQs offline
-
-Cada card e a barra do leitor possuem uma ação para salvar/remover a HQ do armazenamento offline daquele dispositivo.
-
-- PDF: o arquivo completo é armazenado no Cache Storage, com suporte a requisições Range quando estiver offline;
-- imagem: a página original é armazenada;
-- CBZ/CBR: o índice do arquivo compactado e todas as páginas extraídas são armazenados;
-- o shell do aplicativo e respostas recentes de catálogo são mantidos pelo Service Worker para permitir reabrir o leitor sem rede.
-
-O conteúdo offline é propositalmente local ao dispositivo; favoritos e progresso são compartilhados pelo servidor.
-
-### Perfil de leitura
-
-O deployment usa um único perfil de leitura compartilhado. Isso é adequado para uma instalação pessoal do HQ Reader: qualquer dispositivo que abra a mesma implantação recebe os mesmos favoritos e progresso.
+Configure no projeto Vercel as mesmas variáveis server-side/públicas adequadas.

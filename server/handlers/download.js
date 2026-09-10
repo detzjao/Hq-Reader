@@ -1,4 +1,4 @@
-import { getComic } from '../catalog.js';
+import { getUnifiedComic } from '../catalogV2.js';
 import { driveDownloadUrl } from '../googleDrive.js';
 import { sendError } from '../http.js';
 
@@ -15,7 +15,7 @@ export default async function handler(req, res) {
       return res.redirect(302, driveDownloadUrl({ id, resourceKey }));
     }
 
-    const file = await getComic(id);
+    const file = await getUnifiedComic(id);
     if (file.sourceType === 'blob' && (file.downloadUrl || file.blobUrl)) return res.redirect(302, file.downloadUrl || file.blobUrl);
     return res.redirect(302, driveDownloadUrl(file));
   } catch (error) { return sendError(res, error); }

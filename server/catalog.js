@@ -7,6 +7,20 @@ import { isAdminConfigured } from './auth.js';
 import { driveThumbnailUrl, parseGoogleDriveLink, probePublicFile } from './googleDrive.js';
 import { ensureSupportedExtension, extension, extensionForMime, formatForFile, isSupportedName, mimeForName } from './formats.js';
 import { naturalSort } from './naturalSort.js';
+import { hasSupabaseRead, hasSupabaseWrite } from './supabase.js';
+import {
+  deleteSupabaseArchive,
+  readSupabaseComic,
+  readSupabaseComics,
+  readSupabaseSources,
+  readSupabaseSourceStatuses,
+  softDeleteSupabaseComic,
+  upsertSupabaseComic,
+  upsertSupabaseComics,
+  upsertSupabaseSource,
+  upsertSupabaseSourceStatus,
+  upsertSupabaseSources
+} from './supabaseStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INITIAL_PATH = path.resolve(__dirname, '../data/initial-library.json');
@@ -19,6 +33,7 @@ let dynamicCache = { at: 0, files: null };
 let syncSnapshotCache = { at: 0, files: null };
 let sourceCache = { at: 0, sources: null };
 let sourceSyncStatusCache = { at: 0, statuses: null };
+let supabaseLegacyMirrorAttempted = false;
 
 let metadataBlobAccess = null;
 
@@ -179,13 +194,25 @@ function latestStatusById(revisions) {
 }
 
 export async function saveSourceSyncStatus(status) {
-  if (!isBlobConfigured() || !status?.id) return false;
-  const now = new Date().toISOString();
-  const revision = { ...status, syncedAt: status.syncedAt || now, _revisionAt: now };
-  const pathname = `${SOURCE_SYNC_STATUS_PREFIX}${encodeURIComponent(status.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
-  await putMetadataBlob(pathname, JSON.stringify(revision));
-  sourceSyncStatusCache = { at: 0, statuses: null };
-  return true;
+  if (!status?.id) return false;
+  let persisted = false;
+  if (hasSupabaseWrite()) {
+    try {
+      await upsertSupabaseSourceStatus(status);
+      persisted = true;
+    } catch {}
+  }
+  if (isBlobConfigured()) {
+    try {
+      const now = new Date().toISOString();
+      const revision = { ...status, syncedAt: status.syncedAt || now, _revisionAt: now };
+      const pathname = `${SOURCE_SYNC_STATUS_PREFIX}${encodeURIComponent(status.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
+      await putMetadataBlob(pathname, JSON.stringify(revision));
+      sourceSyncStatusCache = { at: 0, statuses: null };
+      persisted = true;
+    } catch {}
+  }
+  return persisted;
 }
 
 function latestSourceById(revisions) {
@@ -200,12 +227,24 @@ function latestSourceById(revisions) {
 }
 
 export async function saveCatalogSource(source) {
-  if (!isBlobConfigured() || !source?.id) return false;
-  const revision = { ...source, _revisionAt: new Date().toISOString() };
-  const pathname = `${SOURCE_REVISION_PREFIX}${encodeURIComponent(source.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
-  await putMetadataBlob(pathname, JSON.stringify(revision));
-  sourceCache = { at: 0, sources: null };
-  return true;
+  if (!source?.id) return false;
+  let persisted = false;
+  if (hasSupabaseWrite()) {
+    try {
+      await upsertSupabaseSource(source);
+      persisted = true;
+    } catch {}
+  }
+  if (isBlobConfigured()) {
+    try {
+      const revision = { ...source, _revisionAt: new Date().toISOString() };
+      const pathname = `${SOURCE_REVISION_PREFIX}${encodeURIComponent(source.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
+      await putMetadataBlob(pathname, JSON.stringify(revision));
+      sourceCache = { at: 0, sources: null };
+      persisted = true;
+    } catch {}
+  }
+  return persisted;
 }
 
 async function latestSyncSnapshot({ force = false } = {}) {
@@ -234,13 +273,24 @@ async function latestSyncSnapshot({ force = false } = {}) {
 }
 
 export async function saveSyncSnapshot(files) {
-  if (!isBlobConfigured()) return false;
   const unique = [...new Map((files || []).filter((file) => file?.id).map((file) => [file.id, file])).values()];
-  const payload = { syncedAt: new Date().toISOString(), files: unique };
-  const pathname = `${SYNC_SNAPSHOT_PREFIX}${Date.now()}-${crypto.randomUUID()}.json`;
-  await putMetadataBlob(pathname, JSON.stringify(payload));
-  syncSnapshotCache = { at: Date.now(), files: unique };
-  return true;
+  let persisted = false;
+  if (hasSupabaseWrite()) {
+    try {
+      await upsertSupabaseComics(unique);
+      persisted = true;
+    } catch {}
+  }
+  if (isBlobConfigured()) {
+    try {
+      const payload = { syncedAt: new Date().toISOString(), files: unique };
+      const pathname = `${SYNC_SNAPSHOT_PREFIX}${Date.now()}-${crypto.randomUUID()}.json`;
+      await putMetadataBlob(pathname, JSON.stringify(payload));
+      syncSnapshotCache = { at: Date.now(), files: unique };
+      persisted = true;
+    } catch {}
+  }
+  return persisted;
 }
 
 function latestRevisionById(revisions) {
@@ -281,7 +331,7 @@ export function publicComic(file) {
   };
 }
 
-export async function getCatalog({ force = false } = {}) {
+async function getLegacyCatalog({ force = false } = {}) {
   const base = await seed();
   const sourceById = new Map((base.sources || []).filter((source) => source?.id).map((source) => [source.id, { ...source }]));
   const sourceLatest = latestSourceById(await dynamicSourceRevisions({ force }));
@@ -289,7 +339,6 @@ export async function getCatalog({ force = false } = {}) {
     if (revision.deleted) sourceById.delete(id);
     else sourceById.set(id, { ...(sourceById.get(id) || {}), ...revision });
   }
-  const sources = [...sourceById.values()];
   const byId = new Map(base.files.map((file) => [file.id, { ...file, category: normalizedCategory(file) }]));
   const syncedFiles = await latestSyncSnapshot({ force });
   for (const file of syncedFiles) {
@@ -302,16 +351,90 @@ export async function getCatalog({ force = false } = {}) {
     if (revision.deleted) byId.delete(id);
     else byId.set(id, { ...(byId.get(id) || {}), ...revision, category: normalizedCategory(revision) });
   }
+  return { version: base.version, updatedAt: base.updatedAt, sources: [...sourceById.values()], files: [...byId.values()] };
+}
+
+function sortCatalogFiles(files) {
   const categoryRank = new Map([['Marvel', 0], ['DC Comics', 1], ['Turma da Mônica', 2], ['Outros', 99]]);
-  const files = [...byId.values()].sort((a, b) => {
+  return [...files].filter((file) => file?.id && !file.deleted).sort((a, b) => {
     const ar = categoryRank.get(normalizedCategory(a)) ?? 50;
     const br = categoryRank.get(normalizedCategory(b)) ?? 50;
     return ar - br || naturalSort(`${a.path || ''}/${a.name}`, `${b.path || ''}/${b.name}`);
   });
-  return { version: base.version, updatedAt: base.updatedAt, sources, files };
+}
+
+export async function getSeedCatalog() {
+  const base = await seed();
+  return {
+    version: base.version,
+    updatedAt: base.updatedAt,
+    sources: Array.isArray(base.sources) ? base.sources : [],
+    files: sortCatalogFiles(
+      (Array.isArray(base.files) ? base.files : []).map((file) => ({
+        ...file,
+        category: normalizedCategory(file)
+      }))
+    )
+  };
+}
+
+export async function getCatalog({ force = false } = {}) {
+  // O Google Drive/seed é a base da biblioteca. Integrações opcionais
+  // (Supabase e Vercel Blob legado) nunca podem impedir o catálogo de abrir.
+  let legacy;
+  try {
+    legacy = await getLegacyCatalog({ force });
+  } catch (error) {
+    console.error('[CATALOG_OPTIONAL_STORAGE_FAILED] Usando seed do Google Drive.', error);
+    legacy = await getSeedCatalog();
+  }
+
+  if (!hasSupabaseRead()) {
+    return { ...legacy, files: sortCatalogFiles(legacy.files || []) };
+  }
+
+  // Espelha o catálogo legado uma única vez por instância. Isso leva para o
+  // Supabase o seed e também snapshots já encontrados nas versões anteriores.
+  if (hasSupabaseWrite() && !supabaseLegacyMirrorAttempted) {
+    supabaseLegacyMirrorAttempted = true;
+    try {
+      await upsertSupabaseSources(legacy.sources || []);
+      await upsertSupabaseComics(legacy.files || []);
+    } catch {
+      // Se as migrations ainda não estiverem aplicadas, continua no legado.
+    }
+  }
+
+  try {
+    const [dbFiles, dbSources] = await Promise.all([
+      readSupabaseComics(),
+      readSupabaseSources()
+    ]);
+    const sourceById = new Map((legacy.sources || []).filter((source) => source?.id).map((source) => [source.id, source]));
+    for (const source of dbSources || []) if (source?.id) sourceById.set(source.id, { ...(sourceById.get(source.id) || {}), ...source });
+
+    const byId = new Map((legacy.files || []).filter((file) => file?.id).map((file) => [file.id, file]));
+    for (const file of dbFiles || []) if (file?.id) byId.set(file.id, { ...(byId.get(file.id) || {}), ...file, category: normalizedCategory(file) });
+
+    return {
+      version: legacy.version,
+      updatedAt: legacy.updatedAt,
+      sources: [...sourceById.values()].filter((source) => !source.deleted),
+      files: sortCatalogFiles([...byId.values()])
+    };
+  } catch (error) {
+    console.error('[CATALOG_SUPABASE_MERGE_FAILED] Continuando com Google Drive/seed.', error);
+    return { ...legacy, files: sortCatalogFiles(legacy.files || []) };
+  }
 }
 
 export async function getComic(id) {
+  if (hasSupabaseRead()) {
+    try {
+      const file = await readSupabaseComic(id);
+      if (file) return file;
+    } catch {}
+  }
   const catalog = await getCatalog();
   const file = catalog.files.find((item) => item.id === id);
   if (!file) { const e = new Error('HQ não encontrada.'); e.code = 'COMIC_NOT_FOUND'; e.status = 404; throw e; }
@@ -319,12 +442,29 @@ export async function getComic(id) {
 }
 
 export async function writeRevision(file) {
-  if (!isBlobConfigured()) { const e = new Error('Conecte um Vercel Blob ao projeto para salvar alterações.'); e.code = 'BLOB_NOT_CONFIGURED'; e.status = 503; throw e; }
   const revision = { ...file, _revisionAt: new Date().toISOString() };
-  const pathname = `${REVISION_PREFIX}${encodeURIComponent(file.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
-  await putMetadataBlob(pathname, JSON.stringify(revision));
-  dynamicCache = { at: 0, files: null };
-  syncSnapshotCache = { at: 0, files: null };
+  let persisted = false;
+  if (hasSupabaseWrite()) {
+    try {
+      await upsertSupabaseComic(revision);
+      persisted = true;
+    } catch {}
+  }
+  if (isBlobConfigured()) {
+    try {
+      const pathname = `${REVISION_PREFIX}${encodeURIComponent(file.id)}/${Date.now()}-${crypto.randomUUID()}.json`;
+      await putMetadataBlob(pathname, JSON.stringify(revision));
+      dynamicCache = { at: 0, files: null };
+      syncSnapshotCache = { at: 0, files: null };
+      persisted = true;
+    } catch {}
+  }
+  if (!persisted) {
+    const e = new Error('Configure o Supabase (SERVICE_ROLE) ou o armazenamento legado para salvar alterações.');
+    e.code = 'SHARED_STORAGE_NOT_CONFIGURED';
+    e.status = 503;
+    throw e;
+  }
   return revision;
 }
 
@@ -420,12 +560,49 @@ export async function updateComicRevision(id, patch) {
 
 export async function removeComic(id) {
   const file = await getComic(id);
-  await writeRevision({ id, deleted: true });
-  if (file.sourceType === 'blob' && isBlobConfigured()) {
-    const targets = [file.blobUrl, file.thumbnailUrl, ...(file.archivePages || []).map((page) => page.url)].filter((url) => /^https?:/i.test(String(url || '')));
-    if (targets.length) await del(targets).catch(() => {});
+  let persisted = false;
+  if (hasSupabaseWrite()) {
+    try {
+      await softDeleteSupabaseComic(id);
+      await deleteSupabaseArchive(id).catch(() => {});
+      persisted = true;
+    } catch {}
+  }
+  if (isBlobConfigured()) {
+    try {
+      await writeRevision({ id, deleted: true });
+      persisted = true;
+    } catch {}
+    if (file.sourceType === 'blob') {
+      const targets = [file.blobUrl, file.thumbnailUrl, ...(file.archivePages || []).map((page) => page.url)].filter((url) => /^https?:/i.test(String(url || '')));
+      if (targets.length) await del(targets).catch(() => {});
+    }
+  }
+  if (!persisted) {
+    const e = new Error('Não foi possível persistir a remoção.');
+    e.code = 'REMOVE_NOT_PERSISTED';
+    e.status = 503;
+    throw e;
   }
   return { removed: id };
+}
+
+export async function migrateLegacyCatalogToSupabase() {
+  if (!hasSupabaseWrite()) {
+    const e = new Error('Configure SUPABASE_SERVICE_ROLE_KEY na Vercel antes de migrar a biblioteca.');
+    e.code = 'SUPABASE_SERVICE_ROLE_REQUIRED';
+    e.status = 503;
+    throw e;
+  }
+  const legacy = await getLegacyCatalog({ force: true });
+  await upsertSupabaseSources(legacy.sources || []);
+  await upsertSupabaseComics(legacy.files || []);
+  supabaseLegacyMirrorAttempted = true;
+  return {
+    ok: true,
+    comics: (legacy.files || []).length,
+    sources: (legacy.sources || []).length
+  };
 }
 
 export async function libraryStatus({ force = false } = {}) {
@@ -451,7 +628,12 @@ export async function libraryStatus({ force = false } = {}) {
     metricsBySource.set(sourceId, metrics);
   }
 
-  const statusById = latestStatusById(await dynamicSourceSyncStatuses({ force }));
+  const legacyStatuses = await dynamicSourceSyncStatuses({ force });
+  let supabaseStatuses = [];
+  if (hasSupabaseRead()) {
+    try { supabaseStatuses = await readSupabaseSourceStatuses(); } catch {}
+  }
+  const statusById = latestStatusById([...legacyStatuses, ...supabaseStatuses]);
   const sourceStats = (catalog.sources || []).map((source) => {
     const metrics = metricsBySource.get(source.id) || { files: 0, pdf: 0, cbz: 0, cbr: 0, images: 0, other: 0, lastSyncedAt: null };
     const status = statusById.get(source.id) || null;
@@ -475,8 +657,10 @@ export async function libraryStatus({ force = false } = {}) {
     sources: catalog.sources,
     sourceStats,
     blobConfigured: isBlobConfigured(),
+    supabaseConfigured: hasSupabaseRead(),
+    supabaseWriteEnabled: hasSupabaseWrite(),
     adminConfigured: isAdminConfigured(),
-    writeEnabled: isBlobConfigured() && isAdminConfigured(),
+    writeEnabled: (hasSupabaseWrite() || isBlobConfigured()) && isAdminConfigured(),
     uploadEnabled: isBlobConfigured() && isAdminConfigured()
   };
 }

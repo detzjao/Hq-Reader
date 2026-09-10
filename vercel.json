@@ -4,10 +4,15 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "node_modules/node-unrar-js/dist/js/unrar.wasm"
     }
   },
   "rewrites": [
+    {
+      "source": "/api/admin-users",
+      "destination": "/api/index?route=admin-users"
+    },
     {
       "source": "/api/archive",
       "destination": "/api/index?route=archive"
@@ -61,7 +66,39 @@
       "destination": "/api/index?route=user-state"
     },
     {
+      "source": "/api/supabase-health",
+      "destination": "/api/index?route=supabase-health"
+    },
+    {
+      "source": "/api/supabase-migrate",
+      "destination": "/api/index?route=supabase-migrate"
+    },
+    {
+      "source": "/api/drive-sync",
+      "destination": "/api/index?route=drive-sync"
+    },
+    {
+      "source": "/api/diagnostics",
+      "destination": "/api/index?route=diagnostics"
+    },
+    {
       "source": "/reader/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/local",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/comic/(.*)",
       "destination": "/index.html"
     }
   ]

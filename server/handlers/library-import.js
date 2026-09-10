@@ -7,7 +7,7 @@ export const config = { maxDuration: 60 };
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.', code: 'METHOD_NOT_ALLOWED' });
   try {
-    assertAdminRequest(req);
+    await assertAdminRequest(req);
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const result = await importDriveLinks(body.text || '');
     res.setHeader('Cache-Control', 'no-store');

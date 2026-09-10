@@ -1,6 +1,6 @@
 {
   "name": "hq-reader-vercel",
-  "version": "2.3.0",
+  "version": "3.2.1",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -8,13 +8,20 @@
   ],
   "scripts": {
     "build": "npm run build --workspace hq-reader-frontend",
-    "dev": "npm run dev --workspace hq-reader-frontend",
-    "check": "node --check server/catalog.js && node --check server/googleDrive.js && node --check server/sourceBootstrap.js && node --check server/publicFolderSync.js && node --check server/archiveCache.js && node --check server/userState.js && node --check server/handlers/library.js && node --check server/handlers/user-state.js && node --check api/index.js",
-    "start": "npm run dev --workspace hq-reader-frontend"
+    "dev": "node scripts/dev-local.js",
+    "check": "node --check server/supabase.js && node --check server/auth.js && node --check server/devServer.js && node --check server/supabaseStore.js && node --check server/catalog.js && node --check server/catalogV2.js && node --check server/runtimeCatalog.js && node --check server/driveApiCrawler.js && node --check server/googleDrive.js && node --check server/sourceBootstrap.js && node --check server/publicFolderSync.js && node --check server/archive.js && node --check server/archiveCache.js && node --check server/userState.js && node --check server/handlers/comics.js && node --check server/handlers/comic.js && node --check server/handlers/content.js && node --check server/handlers/download.js && node --check server/handlers/archive.js && node --check server/handlers/library.js && node --check server/handlers/drive-sync.js && node --check server/handlers/diagnostics.js && node --check server/handlers/user-state.js && node --check server/handlers/admin-users.js && node --check api/index.js",
+    "start": "node scripts/dev-local.js",
+    "migrate:supabase": "node scripts/migrate-old-library.js",
+    "dev:frontend": "npm run dev --workspace hq-reader-frontend",
+    "dev:api": "node server/devServer.js",
+    "verify:catalog": "node scripts/verify-catalog-base.js",
+    "doctor:api": "node scripts/doctor-api.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.0",
     "@vercel/blob": "^2.8.0",
     "adm-zip": "^0.5.16",
+    "dotenv": "^16.4.7",
     "node-unrar-js": "^2.0.2"
   },
   "allowScripts": {

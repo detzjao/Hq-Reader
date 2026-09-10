@@ -1,6 +1,6 @@
 import { handleUpload } from '@vercel/blob/client';
+import { assertAdminAccessToken } from '../auth.js';
 import { isSupportedName } from '../formats.js';
-import { verifyAdminToken } from '../auth.js';
 import { sendError } from '../http.js';
 
 const ALLOWED_TYPES = [
@@ -19,8 +19,11 @@ export default async function handler(req, res) {
       onBeforeGenerateToken: async (pathname, clientPayload) => {
         let payload = {};
         try { payload = JSON.parse(clientPayload || '{}'); } catch {}
-        if (!verifyAdminToken(payload.adminToken)) { const e = new Error('Senha de administração inválida.'); e.code = 'ADMIN_UNAUTHORIZED'; e.status = 401; throw e; }
-        if (!isSupportedName(pathname)) { const e = new Error('Formato não suportado.'); e.code = 'UNSUPPORTED_FORMAT'; e.status = 415; throw e; }
+        await assertAdminAccessToken(payload.accessToken);
+        if (!isSupportedName(pathname)) {
+          const error = new Error('Formato não suportado.');
+          error.code = 'UNSUPPORTED_FORMAT'; error.status = 415; throw error;
+        }
         return {
           allowedContentTypes: ALLOWED_TYPES,
           maximumSizeInBytes: Number(process.env.MAX_UPLOAD_BYTES || 524_288_000),

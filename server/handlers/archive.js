@@ -1,6 +1,6 @@
 import { getArchivePages, getArchivePagesForFile } from '../archiveCache.js';
 import { publicComicById } from '../comics.js';
-import { publicComic } from '../catalog.js';
+import { publicComicV2 } from '../catalogV2.js';
 import { mimeForName } from '../formats.js';
 import { sendError } from '../http.js';
 
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
       };
       const pages = await getArchivePagesForFile(file, { persist: false });
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.status(200).json({ comic: publicComic(file), pages });
+      return res.status(200).json({ comic: publicComicV2(file), pages });
     }
 
     const [pages, comic] = await Promise.all([getArchivePages(id), publicComicById(id)]);

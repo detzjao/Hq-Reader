@@ -7,7 +7,6 @@ import {
   FileUp,
   FolderTree,
   HardDrive,
-  KeyRound,
   LibraryBig,
   Loader2,
   Plus,
@@ -16,13 +15,12 @@ import {
   UploadCloud
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, getAdminToken, setAdminToken, uploadBlobFile, uploadThumbnailBlob } from '../services/api.js';
+import { api, uploadBlobFile, uploadThumbnailBlob } from '../services/api.js';
 import { loadPdf } from '../services/pdf.js';
 
 const EXAMPLE_LINK = 'https://drive.google.com/drive/folders/ID_DA_PASTA ou https://drive.google.com/file/d/ID_DO_ARQUIVO/view';
 const CATEGORY_SUGGESTIONS = ['Marvel', 'DC Comics', 'Turma da Mônica'];
 const ACCEPTED_FILES = '.pdf,.cbz,.cbr,.jpg,.jpeg,.png,.webp,.gif';
-const ADMIN_PASSWORD = '@detzjao1';
 
 function ext(name = '') { return name.split('.').pop()?.toLowerCase() || ''; }
 
@@ -77,7 +75,6 @@ export default function LibraryManager() {
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState('');
   const [refreshingDatabase, setRefreshingDatabase] = useState(false);
-  const [adminToken, setAdminTokenState] = useState(() => getAdminToken());
   const [libraryStatus, setLibraryStatus] = useState(null);
   const [syncingSource, setSyncingSource] = useState('');
   const fileInputRef = useRef(null);
@@ -115,21 +112,7 @@ export default function LibraryManager() {
   );
 
   function notifyUpdate() { window.dispatchEvent(new CustomEvent('hq-reader:library-updated')); }
-  function canWrite() { return getAdminToken() === ADMIN_PASSWORD; }
-
-  function savePassword() {
-    const value = adminToken.trim();
-    if (value !== ADMIN_PASSWORD) {
-      setAdminToken('');
-      setError('Senha administrativa incorreta.');
-      setMessage('');
-      return;
-    }
-    setAdminToken(value);
-    setAdminTokenState(value);
-    setMessage('Acesso administrativo liberado neste navegador.');
-    setError('');
-  }
+  function canWrite() { return true; }
 
   async function handleUpload() {
     if (!uploadFiles.length || !canWrite()) return;
@@ -210,7 +193,7 @@ export default function LibraryManager() {
 
   async function handleRefreshDatabase() {
     if (!canWrite()) {
-      setError('Entre com a senha administrativa antes de atualizar a base.');
+      setError('Sua sessão não possui permissão administrativa.');
       setMessage('');
       return;
     }
@@ -276,16 +259,7 @@ export default function LibraryManager() {
     <div className="space-y-6">
       <datalist id="hq-category-suggestions">{CATEGORY_SUGGESTIONS.map((item) => <option key={item} value={item} />)}</datalist>
 
-      <section>
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-red-500/10 text-red-400"><KeyRound className="h-5 w-5" /></span>
-          <div><h3 className="text-lg font-bold text-white">Acesso administrativo</h3><p className="mt-0.5 text-sm text-zinc-500">Informe a senha para adicionar, importar ou remover HQs.</p></div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <input type="password" value={adminToken} onChange={(e) => setAdminTokenState(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') savePassword(); }} placeholder="Senha" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-red-500/60" />
-          <button type="button" onClick={savePassword} className="rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-bold text-zinc-200 hover:bg-white/10">Entrar</button>
-        </div>
-      </section>
+      <section className="rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.05] p-4 text-sm text-emerald-300">Sessão administrativa validada pelo Supabase. As ações abaixo exigem papel <strong>admin</strong>.</section>
 
       <section className="border-t border-white/5 pt-5">
         <div className="flex items-center justify-between gap-4">

@@ -9,8 +9,9 @@ import {
   queueReadingChange,
   sharedStateNeedsMigration
 } from './libraryState.js';
+import { getAccessToken } from './supabaseClient.js';
 
-const ADMIN_STORAGE_KEY = 'hq-reader:admin-token';
+
 const LEGACY_DISCOVERED_STORAGE_KEY = 'hq-reader:drive-sync-files';
 const LEGACY_CUSTOM_SOURCES_STORAGE_KEY = 'hq-reader:custom-drive-sources';
 
@@ -57,19 +58,6 @@ export class ApiError extends Error {
   }
 }
 
-export function getAdminToken() {
-  try { return localStorage.getItem(ADMIN_STORAGE_KEY) || ''; } catch { return ''; }
-}
-
-export function setAdminToken(value) {
-  const clean = String(value || '').trim();
-  try {
-    if (clean) localStorage.setItem(ADMIN_STORAGE_KEY, clean);
-    else localStorage.removeItem(ADMIN_STORAGE_KEY);
-  } catch {}
-  return clean;
-}
-
 function getLegacyCustomSources() {
   try {
     const parsed = JSON.parse(localStorage.getItem(LEGACY_CUSTOM_SOURCES_STORAGE_KEY) || '[]');
@@ -99,7 +87,6 @@ function mergeLegacyDiscovered(serverFiles = []) {
 }
 
 async function migrateLegacyDeviceState() {
-  if (!getAdminToken()) return false;
   let changed = false;
 
   const sources = getLegacyCustomSources();
@@ -150,42 +137,48 @@ async function migrateLegacyDeviceState() {
 
 async function parseError(response) {
   let body = {};
-  try { body = await response.json(); } catch {}
-  return new ApiError(body.error || `Erro HTTP ${response.status}.`, { status: response.status, code: body.code || 'HTTP_ERROR' });
+  let raw = '';
+  try { body = await response.clone().json(); } catch {
+    try { raw = await response.text(); } catch {}
+  }
+  const detail = body.error || body.message || raw?.slice(0, 500) || `Erro HTTP ${response.status}.`;
+  return new ApiError(detail, { status: response.status, code: body.code || 'HTTP_ERROR' });
 }
 
 async function request(path, { admin = false, timeout = 30_000, ...options } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
+    const accessToken = await getAccessToken();
     const response = await fetch(path, {
       ...options,
       signal: options.signal || controller.signal,
       headers: {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(admin && getAdminToken() ? { 'X-Admin-Token': getAdminToken() } : {}),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(options.headers || {})
       }
     });
     if (!response.ok) throw await parseError(response);
+    if (response.status === 204) return null;
     return response.json();
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (error?.name === 'AbortError') throw new ApiError('A solicitação demorou demais. Tente novamente.', { code: 'TIMEOUT' });
-    throw new ApiError('Não foi possível concluir a solicitação.', { code: 'NETWORK_ERROR' });
+    throw new ApiError(error?.message === 'Failed to fetch' ? 'Não foi possível conectar à API local. Rode npm run dev na raiz do projeto.' : (error?.message || 'Não foi possível concluir a solicitação.'), { code: 'NETWORK_ERROR' });
   } finally { clearTimeout(timer); }
 }
 
 export async function uploadBlobFile(file, { onProgress } = {}) {
-  const adminToken = getAdminToken();
-  if (!adminToken) throw new ApiError('Informe a senha de administração antes de enviar arquivos.', { code: 'ADMIN_TOKEN_REQUIRED', status: 401 });
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new ApiError('Sua sessão expirou. Entre novamente.', { code: 'AUTH_REQUIRED', status: 401 });
   try {
     return await upload(`hq-reader/uploads/${Date.now()}-${file.name}`, file, {
       access: 'public',
       handleUploadUrl: '/api/blob-upload',
       multipart: file.size > 20 * 1024 * 1024,
-      clientPayload: JSON.stringify({ adminToken }),
+      clientPayload: JSON.stringify({ accessToken }),
       onUploadProgress: onProgress
     });
   } catch (error) {
@@ -194,13 +187,13 @@ export async function uploadBlobFile(file, { onProgress } = {}) {
 }
 
 export async function uploadThumbnailBlob(blob, filename) {
-  const adminToken = getAdminToken();
-  if (!adminToken) return null;
+  const accessToken = await getAccessToken();
+  if (!accessToken) return null;
   try {
     return await upload(`hq-reader/covers/${Date.now()}-${filename}`, blob, {
       access: 'public',
       handleUploadUrl: '/api/blob-upload',
-      clientPayload: JSON.stringify({ adminToken })
+      clientPayload: JSON.stringify({ accessToken })
     });
   } catch { return null; }
 }
@@ -434,6 +427,19 @@ async function addToLibrary({ url, name, path }) {
   return result;
 }
 
+
+async function syncDriveSource(sourceId, continuation = null) {
+  return request('/api/drive-sync', {
+    method: 'POST',
+    timeout: 290_000,
+    body: JSON.stringify({ sourceId, ...(continuation ? { continuation } : {}) })
+  });
+}
+
+async function diagnostics() {
+  return request(`/api/diagnostics?ts=${Date.now()}`, { timeout: 30_000 });
+}
+
 export const api = {
   health: () => request('/api/health'),
   getComics,
@@ -443,12 +449,17 @@ export const api = {
   syncSharedUserState,
   setSharedFavorite,
   saveSharedReading,
-  getArchivePages: (id) => request(`/api/archive?id=${encodeURIComponent(id)}`, { timeout: 120_000 }),
+  getArchivePages: (id) => request(`/api/archive?id=${encodeURIComponent(id)}`, { timeout: 285_000 }),
   getLibraryStatus: (fresh = false) => request(`/api/library${fresh ? `?fresh=${Date.now()}` : ''}`),
   addToLibrary,
   importLibrary: (text) => request('/api/library-import', { method: 'POST', admin: true, body: JSON.stringify({ text }), timeout: 60_000 }),
   registerUpload: ({ blob, originalName, size, path, thumbnailUrl }) => request('/api/library-upload-meta', { method: 'POST', admin: true, body: JSON.stringify({ blob, originalName, size, path, thumbnailUrl }) }),
   removeFromLibrary: (id) => request(`/api/library-delete?id=${encodeURIComponent(id)}`, { method: 'DELETE', admin: true }),
   assetUrl: (value = '') => /^https?:\/\//i.test(value) ? value : value,
-  downloadUrl: (id) => `/api/download?id=${encodeURIComponent(id)}`
+  downloadUrl: (id) => `/api/download?id=${encodeURIComponent(id)}`,
+  adminUsers: () => request('/api/admin-users', { timeout: 30_000 }),
+  syncDriveSource,
+  diagnostics,
+  createAdminUser: (payload) => request('/api/admin-users', { method: 'POST', body: JSON.stringify(payload), timeout: 30_000 }),
+  updateAdminUser: (id, payload) => request(`/api/admin-users?id=${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload), timeout: 30_000 })
 };

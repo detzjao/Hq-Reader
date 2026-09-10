@@ -1,7 +1,10 @@
 import { publicComic, getCatalog, isBlobConfigured, saveCatalogSource, saveSourceSyncStatus, saveSyncSnapshot } from './catalog.js';
+import { hasSupabaseWrite } from './supabase.js';
 import { ensureSupportedExtension, extension, isSupportedName, mimeForName } from './formats.js';
 import { probePublicFile } from './googleDrive.js';
 import { bootstrapFoldersForSource } from './sourceBootstrap.js';
+
+function hasPersistentStorage() { return isBlobConfigured() || hasSupabaseWrite(); }
 
 function stripTags(value = '') {
   return value.replace(/<[^>]*>/g, ' ');
@@ -625,12 +628,12 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [],
   const found = [...foundById.values()];
   const added = found.reduce((count, file) => count + (existingIds.has(file.id) ? 0 : 1), 0);
   let persisted = false;
-  if (found.length && isBlobConfigured()) {
+  if (found.length && hasPersistentStorage()) {
     try {
       // Cada fonte pode ser sincronizada em uma requisição separada. Mantém o catálogo
       // já conhecido no snapshot para a próxima fonte não apagar os resultados anteriores.
-      await saveSyncSnapshot([...catalog.files, ...found]);
-      persisted = true;
+      persisted = await saveSyncSnapshot([...catalog.files, ...found]);
+      if (!persisted) throw persistentStorageError('As HQs foram encontradas, mas não foi possível salvá-las na biblioteca compartilhada.');
     } catch {
       // Não confirma uma sincronização que existiria só neste aparelho. Para a biblioteca
       // ser igual em todos os dispositivos, os resultados precisam chegar ao catálogo global.
@@ -638,7 +641,7 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [],
     }
   }
 
-  if (isBlobConfigured()) {
+  if (hasPersistentStorage()) {
     const syncedAt = new Date().toISOString();
     await Promise.allSettled(summaries.map((summary) => saveSourceSyncStatus({
       ...summary,
@@ -663,7 +666,7 @@ export async function syncConfiguredSources({ extraSources = [], sourceIds = [],
 
 
 export async function importRecoveredDriveFiles(inputs = []) {
-  if (!isBlobConfigured()) throw persistentStorageError();
+  if (!hasPersistentStorage()) throw persistentStorageError();
   const catalog = await getCatalog({ force: true });
   const byId = new Map((catalog.files || []).filter((file) => file?.id).map((file) => [file.id, file]));
   let accepted = 0;
@@ -695,8 +698,10 @@ export async function importRecoveredDriveFiles(inputs = []) {
     accepted += 1;
   }
 
-  if (accepted) await saveSyncSnapshot([...byId.values()]);
-  return { accepted, persisted: true, total: byId.size };
+  let persisted = true;
+  if (accepted) persisted = await saveSyncSnapshot([...byId.values()]);
+  if (accepted && !persisted) throw persistentStorageError();
+  return { accepted, persisted, total: byId.size };
 }
 
 function persistentStorageError(message = 'Não foi possível salvar a biblioteca de forma compartilhada no servidor.') {
@@ -707,7 +712,7 @@ function persistentStorageError(message = 'Não foi possível salvar a bibliotec
 }
 
 export async function registerPublicFolderSources(inputs = []) {
-  if (!isBlobConfigured()) throw persistentStorageError();
+  if (!hasPersistentStorage()) throw persistentStorageError();
   const sources = [];
   const failed = [];
   const unique = new Map();
@@ -734,7 +739,7 @@ export async function registerPublicFolderSources(inputs = []) {
 
 export async function addPublicFolderSource({ url, label = '', path = '', category = '' } = {}) {
   const source = normalizePublicFolderSource({ url, label, path, category });
-  if (!isBlobConfigured()) throw persistentStorageError();
+  if (!hasPersistentStorage()) throw persistentStorageError();
   const sourcePersisted = await saveCatalogSource(source);
   if (!sourcePersisted) throw persistentStorageError();
 

@@ -1,4 +1,4 @@
-import { getComic } from '../catalog.js';
+import { getUnifiedComic } from '../catalogV2.js';
 import { fetchPublicFile } from '../googleDrive.js';
 import { pipeFetchResponse, sendError } from '../http.js';
 
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
       return pipeFetchResponse(upstream, res, { cacheControl: 'public, s-maxage=86400, stale-while-revalidate=604800' });
     }
 
-    const file = await getComic(id);
+    const file = await getUnifiedComic(id);
     if (file.sourceType === 'blob' && file.blobUrl) return res.redirect(307, file.blobUrl);
     const upstream = await fetchPublicFile(file.id, { resourceKey: file.resourceKey || '', range: req.headers.range || '', timeout: 50_000 });
     return pipeFetchResponse(upstream, res, { cacheControl: 'public, s-maxage=86400, stale-while-revalidate=604800' });
