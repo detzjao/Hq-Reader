@@ -1,140 +1,199 @@
-# HQ Reader 3.2.0 — Biblioteca unificada
+# HQ Reader
 
-Esta versão parte do HQ Reader 2.4.2 e corrige a arquitetura das versões 3.1.x.
+Aplicação web para organizar, gerenciar e ler histórias em quadrinhos
+através de uma biblioteca unificada.
 
-## Mudanças principais
+## Sobre o projeto
 
-- Biblioteca inicial única em `/`.
-- Google Drive continua como base principal.
-- Telegram/HDs foi integrado à Biblioteca; não existe mais tela de usuário separada `/local`.
-- URL/token do Worker local ficam somente em `Admin > Telegram / HDs`.
-- Login e cadastro usam Supabase Auth.
-- `profiles.role` separa `user` e `admin`.
-- Painel `/admin` protegido por papel `admin`.
-- `/api/comics` não derruba mais a Biblioteca por falha opcional do Supabase.
-- Catálogo Drive usa seed + catálogo sincronizado + Supabase, com fallback local.
-- Varredura completa dos cinco Drives usa Google Drive API v3, paginação de 1000 itens, recursão em subpastas, atalhos e retries.
-- Novos arquivos descobertos ficam disponíveis também para `/api/content`, `/api/download` e CBZ/CBR; não apenas na listagem.
-- Estado de leitura/favoritos é separado por usuário e pode ser persistido com RLS, sem exigir service-role para cada operação.
-- Nova página `/comic/:id` antes do leitor, com hero, capa, metadados, CTAs e outras edições da coleção.
-- Redesign Pop Art/Spider-Verse sutil, dark/light, halftone, hard shadows, cards 2:3 e progressos.
+O HQ Reader centraliza histórias em quadrinhos vindas de diferentes
+fontes, como Google Drive e Telegram, em uma única interface.
 
-## 1. Supabase — configuração recomendada
+O sistema possui autenticação de usuários, biblioteca personalizada,
+controle de permissões, leitor de HQs e painel administrativo.
 
-No SQL Editor do mesmo projeto Supabase do HQ Reader, execute o arquivo único:
+## Funcionalidades
 
-`supabase/HQ_READER_SETUP_3_2.sql`
+-   Biblioteca unificada de HQs
+-   Login e autenticação com Supabase Auth
+-   Usuários e administradores
+-   Controle de permissões
+-   Favoritos
+-   Progresso de leitura
+-   Página de detalhes
+-   Leitor de quadrinhos
+-   Integração com Google Drive
+-   Integração com Telegram via Worker Python
+-   Catálogo sincronizado
+-   Downloads sob demanda
+-   Painel administrativo
+-   Tema claro e escuro
+-   Interface responsiva
 
-Ele reúne as migrations 001 a 005 em ordem e é idempotente para a instalação esperada.
+## Arquitetura
 
-Depois crie sua conta pela tela `/login` e transforme a primeira conta em admin uma única vez:
-
-```sql
-update public.profiles
-set role = 'admin', updated_at = now()
-where email = 'SEU_EMAIL';
+``` text
+Telegram
+   |
+Worker Python
+   |
+Backend/API
+ /       \
+Drive   Supabase
+   |
+HQ Reader
+   |
+Usuário
 ```
 
-Saia e entre novamente.
+O Worker Telegram é mantido separadamente em repositório privado.
 
-## 2. `.env`
+## Tecnologias
 
-Copie:
+### Frontend
 
-```bat
+-   JavaScript
+-   Vite
+-   HTML
+-   CSS
+
+### Backend
+
+-   Node.js
+-   APIs REST
+
+### Banco e autenticação
+
+-   Supabase
+-   PostgreSQL
+-   Supabase Auth
+-   Row Level Security
+
+### Integrações
+
+-   Google Drive API v3
+-   Telegram
+-   Worker Python
+
+### Deploy
+
+-   Vercel
+-   Git
+-   GitHub
+
+## Estrutura
+
+``` text
+Hq-Reader/
+├── api/
+├── data/
+├── frontend/
+├── scripts/
+├── server/
+├── supabase/
+├── .env.example
+├── package.json
+└── vercel.json
+```
+
+## Google Drive
+
+Suporte para:
+
+-   Paginação
+-   Subpastas
+-   Recursão
+-   Atalhos
+-   Tentativas automáticas
+-   Atualização do catálogo
+
+## Telegram
+
+O Worker Python faz a comunicação com o Telegram e disponibiliza os
+arquivos para o HQ Reader.
+
+As configurações de Telegram ficam restritas aos administradores.
+
+## Permissões
+
+### Usuário
+
+-   Acessar biblioteca
+-   Ler HQs
+-   Favoritar
+-   Acompanhar progresso
+
+### Administrador
+
+-   Gerenciar biblioteca
+-   Configurar integrações
+-   Sincronizar fontes
+-   Administrar configurações
+
+## Configuração
+
+Instalação:
+
+``` bash
+git clone https://github.com/detzjao/Hq-Reader.git
+cd Hq-Reader
+npm install
+```
+
+Criar ambiente:
+
+``` bash
 copy .env.example .env
 ```
 
-Preencha as variáveis públicas e server-side do Supabase. A chave `SUPABASE_SERVICE_ROLE_KEY`/`SUPABASE_SECRET_KEY` nunca deve receber prefixo `VITE_`.
+Configure Supabase e integrações necessárias.
 
-A v3.2.0 final não contém URL/chave de nenhum projeto Supabase embutida. Se alguma variável estiver ausente, o login mostra a configuração faltante em vez de tentar acessar outro projeto silenciosamente.
+## Google Drive
 
-Para a varredura completa das pastas públicas do Google Drive, habilite a Google Drive API no Google Cloud e adicione no backend:
+Variável:
 
-```env
+``` env
 GOOGLE_DRIVE_API_KEY=SUA_API_KEY
 ```
 
-A chave não precisa de OAuth para listar fontes públicas. Restrinja a key à Google Drive API no Google Cloud.
+## Execução local
 
-## 3. Rodar localmente
-
-Na raiz:
-
-```bat
-npm install
-start-local.bat
+``` bash
+npm run dev
 ```
 
 ou:
 
-```bat
-npm run dev
+``` text
+start-local.bat
 ```
 
-O comando sobe os dois processos:
+URLs:
 
-- Frontend: `http://localhost:5173`
-- API: `http://127.0.0.1:8788`
-
-O Vite encaminha `/api/*` para a API local. Não rode apenas o Vite dentro de `frontend/`.
-
-## 4. Buscar TUDO dos Drives
-
-Entre como Admin e abra:
-
-`Admin > Google Drive`
-
-O seed de 698 HQs serve apenas como fallback inicial. Clique em **Sincronizar todos** para percorrer as cinco fontes completas.
-
-A sincronização:
-
-1. lista todas as páginas de cada pasta;
-2. percorre subpastas recursivamente;
-3. resolve atalhos para pasta/arquivo;
-4. repete pastas que falharem até três vezes;
-5. continua em vários lotes até a fila zerar;
-6. salva os novos itens no catálogo runtime local e, quando a chave server-side estiver configurada, também no Supabase.
-
-Em produção/Vercel, configure a chave server-side do Supabase para que o catálogo sincronizado seja persistente entre execuções serverless.
-
-## 5. Telegram + HDs
-
-O usuário não configura token nenhum.
-
-Somente o Admin acessa:
-
-`Admin > Telegram / HDs`
-
-Ali ficam:
-
-- URL do Worker v3;
-- token local;
-- teste de conexão;
-- estado dos volumes/HDs;
-- quantidade catalogada.
-
-Depois de configurado, o catálogo Telegram aparece na mesma Biblioteca junto do Drive. Arquivos ainda remotos podem ser colocados na fila de download sob demanda.
-
-## 6. Diagnóstico de API
-
-Com `npm run dev` aberto, execute em outro terminal:
-
-```bat
-api-diagnostics.bat
+``` text
+Frontend: http://localhost:5173
+API: http://127.0.0.1:8788
 ```
 
-Ele testa `/api/diagnostics`, `/api/comics` e `/api/library` e imprime corpo/status de cada rota. O objetivo é evitar o antigo “Erro HTTP 500” sem contexto.
+## Deploy
 
-## 7. Vercel
+Compatível com Vercel utilizando as variáveis de ambiente configuradas
+no painel.
 
-Foram incluídas rewrites para:
+## Objetivos técnicos
 
-- `/api/drive-sync`
-- `/api/diagnostics`
-- `/comic/*`
-- `/reader/*`
-- `/admin`
-- `/login`
+-   Aplicações web
+-   APIs REST
+-   Autenticação
+-   Banco relacional
+-   Integrações externas
+-   Automação
+-   Processamento de arquivos
+-   Sincronização
+-   UX/UI
+-   Deploy
 
-Configure no projeto Vercel as mesmas variáveis server-side/públicas adequadas.
+## Autor
+
+**João Guilherme Dezotti**
+
+GitHub: https://github.com/detzjao
